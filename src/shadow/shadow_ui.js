@@ -16581,6 +16581,71 @@ function moduleClaimedCcs(moduleId) {
     return v;
 }
 
+/*
+ * PAD BLOCK IS A GLOBAL SWITCH WITH NO OWNER, SO THE HOST DROPS IT.
+ *
+ * `host_pad_block(1)` stops pad notes reaching Move and routes them to
+ * whoever is on screen -- for EVERY module, not just the one that asked. The
+ * two callers (a canvas overlay and the text-entry keyboard) each take it on
+ * open and release it on close, which is correct and is not enough: leave the
+ * module by any path that does not run the close hook and the flag is stranded
+ * ON, and every module after that silently has no pads until a reboot.
+ *
+ * That is the same hazard the CC claims have, and it is solved the same way --
+ * DERIVED every tick from what is on screen, never bookkept. The rule is
+ * one-directional on purpose: this only ever CLEARS. Setting it belongs to
+ * whoever wants the pads, because only they know; clearing it belongs here,
+ * because a component that has gone cannot clear anything.
+ *
+ * (CLAUDE.md: "The shim independently drops every claim when the shadow
+ * display closes, so a shadow_ui that exits or crashes without reconciling
+ * cannot strand one." pad_block had no such backstop.)
+ */
+let padBlockWanted = false;
+function reconcilePadBlock() {
+    if (typeof host_pad_block !== "function") return;
+    /*
+     * THE DISPLAY MUST ACTUALLY BE SHOWING.
+     *
+     * `view` is where the shadow UI would resume, not what is on screen: dismiss
+     * it with the canvas open -- Menu, a Track tap, going off to a sound module
+     * -- and `view` stays CANVAS while Move owns the screen again. Testing the
+     * view alone kept the pads blocked for exactly the case this net exists to
+     * catch, which is somebody leaving to use another module.
+     */
+    const shown = (typeof shadow_get_display_mode !== "function")
+                || shadow_get_display_mode() === 1;
+    const wants = shown && ((view === VIEWS.CANVAS)
+               || (coRunUiActive() && coRunView === VIEWS.CANVAS)
+               || isTextEntryActive());
+    if (wants) { padBlockWanted = true; return; }   /* leave it to the owner */
+    if (!padBlockWanted) return;                    /* nothing to release */
+    padBlockWanted = false;
+    host_pad_block(0);
+    /*
+     * GIVE MOVE ITS PAD LEDS BACK, do not just darken them.
+     *
+     * Move writes a pad LED only when its OWN value changes, so a pad left in
+     * a colour we chose -- or blanked -- stays that way on that track until
+     * something else moves it. Handing them back dark reads as "the pads are
+     * dead": they respond, and they are invisible. Exactly the failure
+     * `shadow_restore_knob_leds` exists to prevent for the rings.
+     *
+     * The shim mirrors Move's own pad LED state into overlay SHM continuously,
+     * so the truth of what Move wants is already there. Restoring HERE rather
+     * than in the module's close hook is deliberate: that hook is not
+     * guaranteed to run, which is the whole reason this reconciler exists.
+     */
+    if (typeof shadow_get_pad_led_snapshot !== "function") return;
+    if (typeof move_midi_internal_send !== "function") return;
+    const snap = shadow_get_pad_led_snapshot();
+    if (!snap) return;
+    for (let note = 68; note <= 99; note++) {
+        const c = snap[String(note)];
+        move_midi_internal_send([0x09, 0x90, note, (c | 0) & 0x7F]);
+    }
+}
+
 function reconcileCcClaim() {
     if (typeof host_claim_ccs !== "function") return;
     const onScreen = !!CC_CLAIM_VIEWS[view] ||
@@ -21698,6 +21763,7 @@ globalThis.tick = function() {
      * the tick as the SINGLE re-check point for that entry condition -- see the
      * table above reconcileCcClaim(). */
     reconcileCcClaim();
+    reconcilePadBlock();
 
     /* Background tick for JS-suspended overtake modules.
      * Each parked module's tick() keeps firing so it can emit MIDI or advance
@@ -23252,8 +23318,29 @@ globalThis.onMidiMessageInternal = function(data) {
      * (wrapped so coRunView returns to the hierarchy editor), mirroring the
      * non-co-run steal below. */
     var canvasInCorun = coRunUiActive() && coRunView === VIEWS.CANVAS;
+    /*
+     * A CANVAS MAY CLAIM THE JOG CLICK, and then BACK is the only way out.
+     *
+     * MoveMainButton IS CC 3 -- the jog click -- and it is stolen here, before
+     * dispatchCanvasMidi, so an overlay can never see it. That is right for a
+     * VIEWER (the sample editor: look, click, leave) and wrong for an EDITOR
+     * that owns the surface, where the click is the primary gesture and losing
+     * it means the view cannot be "locked into" at all.
+     *
+     * Opt-in on the canvas param, exactly like capabilities.claims_ccs, and for
+     * the same reason that one exists: #154 took these buttons unconditionally
+     * and had to be reverted (#175) because it stole them from everyone. A
+     * param that declares nothing behaves precisely as before.
+     *
+     * NOT honoured in co-run: there the canvas is an overlay over a still
+     * running tool, the jog click is how you dismiss it, and a module holding
+     * it would strand the user on top of their own sequencer.
+     */
+    var canvasClaimsClick = !canvasInCorun && !!(canvasParamMeta &&
+        (canvasParamMeta.claims_jog_click === true ||
+         canvasParamMeta.claimsJogClick === true));
     if ((view === VIEWS.CANVAS || canvasInCorun) && (status & 0xF0) === 0xB0) {
-        if (d1 === MoveMainButton && d2 > 0) {
+        if (d1 === MoveMainButton && d2 > 0 && !canvasClaimsClick) {
             if (canvasInCorun) runCoRunChainEdit(function() { closeCanvasPreview(false); });
             else closeCanvasPreview(false);
             announce("Hierarchy Editor");

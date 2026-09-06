@@ -648,6 +648,28 @@ Only consume Back while you actually have somewhere to go back *to*. If `handleB
 always returns truthy the user can never leave your module via Back — it is the only
 host-processed exit in this screen, so the sole remaining way out is to exit shadow mode.
 
+#### Taking the pads (`host_pad_block`)
+
+`host_pad_block(1)` stops pad notes (68–99) reaching Move firmware and forwards
+them to whatever UI is on screen; `host_pad_block(0)` gives them back. Pad LEDs
+are written with `move_midi_internal_send([0x09, 0x90, note, colour])` — the
+same note carries input and colour.
+
+**It is a GLOBAL switch, not a per-module one.** While it is set, no module
+sees the pads, so two rules apply and neither is optional:
+
+- **Take it while visible, not once.** The host releases it whenever nothing on
+  screen wants the pads — including when the shadow display is dismissed — so a
+  UI that claims the pads in an open hook and never again finds them gone after
+  the user leaves and returns. Assert it every frame you are drawn; the call is
+  one SHM byte and is idempotent.
+- **Release means GIVING THE LEDS BACK, not darkening them.** Move writes a pad
+  LED only when its *own* value changes, so a grid left blank stays blank on
+  that track — the pads respond and are invisible, which reads as "the pads are
+  dead". The shim mirrors Move's pad state into overlay SHM continuously;
+  `shadow_get_pad_led_snapshot()` reads it. The host restores from that on
+  release, so a module should simply stop writing pad LEDs and let it.
+
 #### Claiming buttons (`capabilities.claims_ccs`, `claims_edit_ccs`)
 
 Move's buttons reach Move firmware by default and are **not** forwarded to
@@ -676,6 +698,17 @@ component edit/params screens, and a canvas UI (fullscreen or co-run overlay).
 Leave any of those and the buttons return to Move immediately; the shim also
 drops every claim on its own when the shadow display closes, so a shadow UI
 that exits without reconciling cannot strand one.
+
+> **A SHIFT-HELD PRESS IS NEVER DELIVERED TO A CLAIMED CC.** `Shift+<button>`
+> is the host's own vocabulary — Shift+Copy and Shift+Delete are the
+> snapshot/recall gesture — so the shim withholds a shift-held press from the
+> claim entirely: *the module gets the BARE buttons only.* A `shiftHeld()`
+> branch inside a claimed button's handler is therefore **unreachable code
+> that reads as a working feature**, and it fails silently: the gesture simply
+> never arrives, while the code and the documentation both say it should. Use
+> **Mute (CC 88)**, which is forwarded, as a module's second modifier. The jog
+> is unaffected — a different claim path — so `Shift+Jog` and `Shift+Click`
+> do work.
 
 > **Opt-in is the whole point.** #154 withheld Undo/Copy/Delete unconditionally
 > whenever the shadow display was up, and #175 reverted it: it stole Move's
@@ -3194,7 +3227,7 @@ The Signal Chain module allows combining MIDI sources, MIDI effects, sound gener
 |------|------------|
 | MIDI Sources | Sequencers or other modules referenced via `midi_source` |
 | Sound Generators | Line In, SF2, Dexed, CLAP, plus any module marked `"chainable": true` with `"component_type": "sound_generator"` (for example `obxd`, `minijv`) |
-| MIDI Effects | Chord (15 chord types with inversions, voicings, strum), Arpeggiator (off, up, down, up_down, random with BPM/division/sync), Velocity Scale (min/max velocity mapping), plus external MIDI FX from the catalog |
+| MIDI Effects | Chord (15 chord types with inversions, voicings, strum), Arpeggiator (off, up, down, up_down, random with BPM/division/sync), Velocity Scale (min/max velocity mapping), Stacks (chord progression on a note grid; reads and stamps Move clips), plus external MIDI FX from the catalog |
 | Audio Effects | Freeverb (reverb), CLAP effects, plus external audio FX from the catalog (CloudSeed, PSXVerb, Tapescam, etc.) |
 
 ### CLAP Host Module
@@ -3356,6 +3389,41 @@ MIDI FX are built identically to other native plugins:
 | Chord | `chord` | Chord generator (15 types, inversions, voicings, strum) |
 | Arpeggiator | `arp` | Arpeggiator (up, down, up_down, random with tempo sync) |
 | Velocity Scale | `velocity_scale` | Velocity range mapping (min/max) |
+| Stacks | `stacks` | Chord progression sequencer drawn on a note grid |
+
+#### Stacks
+
+A port of Live 12's Stacks generator. Live's writes a progression into a clip;
+Move has no clip a MIDI FX can write to, so this plays the same data model in
+real time and offers the round trip explicitly: **Read Clip** parses the playing
+clip out of the current set's `Song.abl` and names its chords, you edit them on
+the grid, **Preview** auditions, and **Stamp Clip** puts it back.
+
+It is also the worked example for three things a module author will otherwise
+have to infer:
+
+- **A module page that is a picture.** `view` is a `type: "canvas"` param with
+  `as_page: true`, so the grid is a page in the level's jog rotation carrying
+  the level's own knobs — the eight encoders work with no input code.
+- **One read that draws everything.** The staff needs every chord's name,
+  length, offset and resolved pitches. That is one `viz.extra_keys` read
+  (`prog`), not one per chord, because a read is ~2.8 ms against a 1.68 ms page
+  render. The C side publishes the *resolved* notes so voicing is not
+  reimplemented in JS.
+- **File I/O from a MIDI FX.** Every entry point is the SPI callback, so
+  `set_param` only bumps an atomic counter; a worker thread created with
+  `PTHREAD_EXPLICIT_SCHED` + `SCHED_OTHER` does the parsing and publishes with
+  a release-store. Inheriting the callback's FIFO 70 would starve Move's own
+  `Link Main` at 35.
+
+Two rules worth lifting out of it. **The chord-shape table is ordered by
+family** (`5th`, `triad`, `6th`, `7th`, `9th`, `ext`) and that ordering is
+load-bearing: `family` jumps `shape` to the first row of a family and `shape`
+steps within it, which is how 37 shapes stay usable on one enum knob without a
+dynamically-served `chain_params` the grid would cache and settle on. And
+**humanise is a hash, not a generator** — the deviation for a note is a pure
+function of (seed, chord, voice), so the take repeats until you press Randomize
+and the clip Stamp writes is the one Preview played.
 
 ### MIDI FX module.json Example
 

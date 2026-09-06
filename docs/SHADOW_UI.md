@@ -1107,3 +1107,45 @@ and why the shim branch logs nothing: `shadow_log` calls `unified_log`.
 Tests: `tests/host/test_snapshot_plan.sh` (the planner and its counts),
 `test_snapshot_gesture.sh` (the shim branch), `test_snapshot_wiring.sh` (the JS
 wiring and toast geometry), `test_ui_flags_layout.c` (the SHM layout).
+
+### Shared controls are RECONCILED from the screen, never bookkept
+
+Two switches let a UI take a control away from Move firmware: the CC claim
+(`capabilities.claims_ccs` / `claims_edit_ccs`) and `host_pad_block`. Both are
+**global** — while set, no other module sees that control — and both have the
+same failure mode: a UI that takes one and leaves by a path its close hook does
+not cover strands it, and every module afterwards silently loses the control
+until a reboot.
+
+`reconcileCcClaim()` solved this for the buttons by **deriving** the claim every
+tick from what is on screen, never bookkeeping it at the write sites. That is
+the whole design, and it is why a shadow_ui that exits or crashes cannot leave
+a claim behind.
+
+`pad_block` had no such backstop. `reconcilePadBlock()` now runs beside it, and
+three properties are load-bearing:
+
+- **It is ONE-DIRECTIONAL — the host only ever CLEARS.** Setting belongs to
+  whoever wants the pads, because only they know they want them; clearing
+  belongs to the host, because a component that has gone cannot clear anything.
+- **It tests whether the display is SHOWING, not just the view.** `view` is
+  where the shadow UI would *resume*, not what is on screen: dismiss it with a
+  canvas open — Menu, a Track tap, going off to a sound module — and `view`
+  stays `CANVAS` while Move owns the screen again. Testing the view alone kept
+  the pads blocked for exactly the case the net exists to catch.
+- **Releasing RESTORES Move's pad LEDs; it does not darken them.** Move writes
+  a pad LED only when its own value changes, so a grid left blank stays blank
+  on that track: the pads respond and are invisible, reported from the device
+  as *"the pads are dead"*. The shim mirrors Move's pad state into overlay SHM
+  continuously and `shadow_get_pad_led_snapshot()` reads it. This is the same
+  failure `shadow_restore_knob_leds` exists to prevent for the rings — made
+  twice, which is why it is written down here rather than in a comment.
+
+The consequence for a UI that wants the pads is that ownership is
+**continuous**: assert while you are drawn, and let the host release. Text
+entry is the other legitimate owner, so `isTextEntryActive()` is in the
+predicate — cutting it out would have broken the keyboard while fixing this.
+
+Tests: `tests/host/test_pad_block_released.sh` lifts `reconcilePadBlock()` out
+of `shadow_ui.js` and drives it, so the rule is tested rather than the comment
+describing it.
