@@ -607,9 +607,20 @@ keys lit from it stutter behind the music. The playhead is already animated
 locally from `(bpm, posUnits)` for that reason; the chord under it is the one to
 light. Stopped, light the chord being edited instead.
 
-And take the colours from the roll's existing vocabulary — cyan for playing,
-violet for selected — or the keyboard and the notes beside it will disagree
-about the same chord.
+**The labels name the CHORD, not the keyboard.** A fixed reference — every C,
+or the tonic — answers "where am I", which the tonic's violet tint already
+answers without text, and in any key but C it doubles the text down the column.
+Naming the lit keys instead spends the same space on the thing being looked at:
+the notes the current chord is actually made of, spelled with their octaves.
+Right-align each label inside the key that carries it — a black key is 62% wide,
+so aligning both to the gutter edge hangs its label off the end.
+
+**A lit key takes the colour of the note it names** — gold for a chord tone,
+cyan while it sounds, exactly as the roll paints those same notes a few pixels
+to the right. Violet is spoken for by the tonic, as both the tinted key and the
+tonic lane; using it for the selected chord too made "key centre" and "chord
+tone" the same colour, and the keyboard stopped answering *which notes* and
+started needing a legend.
 
 #### A stamp writes the clip's LENGTH as well as its notes
 

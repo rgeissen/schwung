@@ -792,12 +792,19 @@ function drawRoll(p, now){
     var litChord = p.chords[litIdx], lit = {};
     if (litChord && !litChord.rest)
       litChord.notes.forEach(function(nn){ lit[nn] = 1; });
-    /* Borrow the roll's OWN vocabulary rather than inventing one: cyan is the
-       chord being played (drawRoll tints it so), violet is the chord being
-       edited (drawRoll outlines it so). A third colour here would mean the
-       keyboard and the notes beside it disagreed about the same chord. */
+    /*
+     * A LIT KEY IS THE SAME COLOUR AS THE NOTE IT NAMES -- gold for a chord
+     * tone, cyan while it sounds, exactly as drawRoll paints those same notes
+     * a few pixels to the right.
+     *
+     * It was violet for a moment, matching the selection OUTLINE, and that was
+     * wrong for a reason worth keeping: violet is already spoken for by the
+     * tonic, both as the tinted key and as the tonic lane. Two meanings on one
+     * colour and the keyboard stops answering "which notes" and starts needing
+     * a legend.
+     */
     drawKeys(cx, PAD - GUTTER, PAD, lo, hi, yOf, laneH, p.key, lit,
-             live ? "#4FD1E0" : "#8B7BE8");
+             live ? "#4FD1E0" : "#F2A33C");
   }
 
   /* lanes: the SCALE, not the chromatic — the other eight are notes the
@@ -1000,17 +1007,29 @@ function drawKeys(cx, x0, x1, lo, hi, yOf, laneH, key, lit, tint){
         cx.beginPath(); cx.moveTo(x0, y + 1); cx.lineTo(x0 + kw, y + 1); cx.stroke();
       }
 
-      /* Name every C, and the tonic, while there is room to read it. */
-      if (!black && laneH >= 8){
+      /*
+       * THE LABELS NAME THE CHORD, not the keyboard.
+       *
+       * A fixed reference -- every C, or the tonic -- answers "where am I",
+       * which the tonic's violet tint already answers without text, and in any
+       * key but C it doubles the text down the column. Naming the LIT keys
+       * instead spends the same space on the thing being looked at: the notes
+       * the selected or sounding chord is actually made of, spelled out, in
+       * register order. That is the question a chord editor is asked.
+       *
+       * Right-aligned inside the key that carries it -- a black key is 62%
+       * wide, so aligning both to the gutter's edge would hang its label off
+       * the end of the key it belongs to.
+       */
+      if (on && laneH >= 8){
         var pc = ((n % 12) + 12) % 12;
-        if (pc === 0 || tonic){
-          cx.fillStyle = on ? "#0B0E13" : (tonic ? "#4A3F8C" : "#7C8896");
-          cx.font = "700 " + Math.min(9, Math.max(7, laneH - 3)) +
-                    "px ui-monospace,SF Mono,monospace";
-          cx.textAlign = "right";
-          cx.fillText(NOTE[pc] + (Math.floor(n / 12) - 1), x1 - 3, y + kh - 2);
-          cx.textAlign = "left";
-        }
+        cx.fillStyle = "#0B0E13";
+        cx.font = "700 " + Math.min(9, Math.max(7, laneH - 3)) +
+                  "px ui-monospace,SF Mono,monospace";
+        cx.textAlign = "right";
+        cx.fillText(NOTE[pc] + (Math.floor(n / 12) - 1),
+                    x0 + kw - 3, y + kh - 2);
+        cx.textAlign = "left";
       }
     }
   }
