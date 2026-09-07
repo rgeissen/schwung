@@ -749,9 +749,20 @@ function drawRoll(p, now){
  * lagged the tap visibly. The local value is what the user just asked for, so
  * it leads; prog corrects it if the module disagrees (a clamp, an insert).
  */
+/*
+ * The optimistic value is TRANSIENT: it holds only until the next publish.
+ *
+ * Latching it was wrong, because the MODULE moves the selection too -- insert
+ * lands on the new copy, remove shifts to the neighbour, a clamp pulls it into
+ * range. A local value that outlived the round trip overrode all three, so
+ * after `+` the highlight stayed on the chord you copied FROM while the module
+ * was editing the copy. It answers for the gap between the tap and the answer,
+ * and prog wins the moment prog speaks.
+ */
+var selPending = null;
 function selIndex(p){
-  var local = parseInt(get("sel"), 10);
-  if (isFinite(local) && local >= 1 && (!p || local <= p.count)) return local;
+  if (selPending !== null && (!p || (selPending >= 1 && selPending <= p.count)))
+    return selPending;
   return p ? p.sel : 1;
 }
 
@@ -789,14 +800,18 @@ function drawStrip(p){
      * it yields narrow blocks in the roll above.
      */
     b.style.flexGrow = String(Math.max(1, c.len));
-    b.onpointerdown = function(ev){ ev.preventDefault(); set("sel", i+1); holdOn(); };
+    b.onpointerdown = function(ev){
+      ev.preventDefault(); selPending = i+1; set("sel", i+1); holdOn();
+    };
     el.appendChild(b);
   });
 
   var add = document.createElement("button");
   add.className = "card add"; add.textContent = "+";
   add.setAttribute("aria-label", "Add a chord");
-  add.onclick = function(){ set("insert","on"); };
+  /* The module inserts a COPY after the selected chord and lands on it, so
+     the panel must not pin the selection where it was. */
+  add.onclick = function(){ selPending = null; set("insert", "on"); };
   el.appendChild(add);
 }
 /* Compact form for a narrow stepper: the card says "Length", so the unit is
@@ -1335,7 +1350,10 @@ var prog = null, lastStr = "";
 function shortScale(){ return String(get("scale") || "Minor").replace("Major","maj").replace("Minor","min"); }
 function render(){
   var s = get("prog") || (DEMO ? DEMO_PROG : "");
-  if (s !== lastStr){ lastStr = s; prog = parseProg(s); reanchor(prog); }
+  if (s !== lastStr){
+    lastStr = s; prog = parseProg(s); reanchor(prog);
+    selPending = null;          /* the module has answered; it is authoritative */
+  }
   document.getElementById("demoBadge").hidden = !DEMO;
   if (prog){
     document.getElementById("sKey").textContent = NOTE[prog.key] + " " + shortScale();
@@ -1352,7 +1370,8 @@ function render(){
 cv.addEventListener("pointerdown", function(e){
   var r = cv.getBoundingClientRect(), x = e.clientX - r.left;
   for (var i = 0; i < hits.length; i++)
-    if (x >= hits[i].x && x <= hits[i].x + hits[i].w){ set("sel", hits[i].i+1); holdOn(); return; }
+    if (x >= hits[i].x && x <= hits[i].x + hits[i].w){
+      selPending = hits[i].i+1; set("sel", hits[i].i+1); holdOn(); return; }
 });
 
 /* Undo / redo / delete. Write triggers: the value is the word "on". */
@@ -1367,7 +1386,9 @@ cv.addEventListener("pointerdown", function(e){
     var n = prog ? prog.count : 0, cur = selIndex(prog);
     if (n <= 1) return;
     set("remove", "on");
-    vals.sel = String(cur > n - 1 ? n - 1 : cur);
+    /* Optimistic only for the gap: the removed slot is gone, so point at what
+       takes its place. Cleared by the next publish either way. */
+    selPending = cur > n - 1 ? n - 1 : cur;
   };
 })();
 
