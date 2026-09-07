@@ -915,6 +915,38 @@
       55,
       62,
       63
+    ],
+    "shape_families": [
+      {
+        "name": "5th",
+        "first": 0,
+        "count": 4
+      },
+      {
+        "name": "triad",
+        "first": 4,
+        "count": 6
+      },
+      {
+        "name": "6th",
+        "first": 10,
+        "count": 3
+      },
+      {
+        "name": "7th",
+        "first": 13,
+        "count": 11
+      },
+      {
+        "name": "9th",
+        "first": 24,
+        "count": 8
+      },
+      {
+        "name": "ext",
+        "first": 32,
+        "count": 6
+      }
     ]
   },
   "ui_hierarchy": {

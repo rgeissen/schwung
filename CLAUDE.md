@@ -1202,7 +1202,47 @@ for devices whose `heal` is **blessed** (root-owned + setuid — i.e. they ran
 `/system/repair` page (SSH `chown root + chmod 4755 + heal --reboot`, or the GUI
 installer). See memory `web-update-shim-bootstrap-gap`.
 
-The manager also serves a **file browser** (`/files`, under `/data/UserData/`) and per-slot module **Remote UIs** (auto-discovers `web_ui.html` per module, served in a sandboxed iframe). The file browser is keyboard- and screen-reader-accessible: rows are `tabindex=0` with spoken `aria-label`s, **Enter opens** (dir → in, file → download), **Space selects**, with a checkbox column for multi-select. Source: `schwung-manager/templates/files.html`, `remote_ui.go`.
+The manager also serves a **file browser** (`/files`, under `/data/UserData/`) and per-slot module **Remote UIs** (auto-discovers `web_ui.html` per module, served in a sandboxed iframe).
+
+**A Remote UI panel that never appeared was FOLDED, not missing** — and the
+whole stack reported success while it was. Any component may ship a
+`web_ui.html`, but slot state seeded `collapsed: { synth: false, fx1: true,
+fx2: true, midi_fx1: true }`, a literal written when every non-synth section
+was generated rows, and `renderComponentSection` returns at `if (isCollapsed)`
+one branch ABOVE the custom-UI branch. So Stacks' entire UI sat behind a
+one-line triangle ~3000px below the synth panel. Fold state is DERIVED now
+(`sectionCollapsed()` stores only the user's own choice), because the right
+default depends on the `custom_ui` message, which arrives after the state is
+built — and both render paths share ONE `COMPONENT_ORDER` (signal flow:
+midi_fx1, synth, fx1, fx2), since the custom-synth path's own list drew the
+MIDI FX last. **A panel must also never branch on a media query that reads its
+own height**: the parent sizes the iframe from the height the panel reports, so
+`(orientation:portrait)` is a feedback loop that latches. `docs/MODULES.md`,
+`tests/host/test_remote_ui_panel_visible.sh`.
+
+**`viz.extra_keys` never reached the Remote UI**, so a module whose panel is
+driven by one worked on the device and drew nothing in the browser. Three
+paths complete an initial value send and the `state` fast path RETURNS EARLY,
+so fixing only the streaming one is invisible — and that fast path accepted
+any `state` that parsed as a JSON object, which an opaque save blob
+(`{"s": "v6|..."}`) does, so it pushed one key and skipped the sweep of all 53.
+**A parser is never written twice where a test can run both:**
+`test_stacks_prog_parsers_agree.sh` executes canvas.js's and web_ui.html's
+`parseProg` over one corpus (`Number("")` is 0, `parseInt("")` is NaN — that
+divergence drew a phantom note on every rest), and anything else derived from
+a DSP table is generated (`tools/stacks/gen_shape_families.py`) rather than
+retyped. **One scroller per bank**: a capped scroller inside a grid card is
+squeezed below its own content and clipped, leaving a list you can see past
+and cannot reach. `docs/MODULES.md`.
+
+**`install.sh` rebuilt the manager only if local `go` existed, and skipped it in
+SILENCE otherwise** — the lone warning sat on the build-failed branch *inside*
+that `if`, so on a Docker-only machine the stale binary already in the tarball
+was uploaded and the deploy reported success. A manager fix could be deployed,
+confirmed deployed, and still not be running. Same shape as the link-sidecar
+skip below. `scripts/build-manager.sh` is the single builder for both
+`build.sh` and `install.sh` (go, else Docker, else a hard failure);
+`SCHWUNG_ALLOW_STALE_MANAGER=1` opts out. The file browser is keyboard- and screen-reader-accessible: rows are `tabindex=0` with spoken `aria-label`s, **Enter opens** (dir → in, file → download), **Space selects**, with a checkbox column for multi-select. Source: `schwung-manager/templates/files.html`, `remote_ui.go`.
 
 ### Catalog Format (v2)
 

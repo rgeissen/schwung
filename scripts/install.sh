@@ -1148,12 +1148,24 @@ ssh_root_with_retry "if [ ! -L /data/UserData/move-anything ] && [ ! -d /data/Us
 # then re-run package.sh — the single packaging authority — instead of
 # injecting into the existing tarball (the old gunzip/append/gzip dance was
 # the third copy of that logic; see the 2026-06-11 cleanup review C-8).
-if [ "$use_local" = true ] && command -v go &>/dev/null && [ -d "$REPO_ROOT/schwung-manager" ] && [ -d "$REPO_ROOT/build" ]; then
+#
+# THE GUARD WAS `command -v go`, AND THAT MADE THIS STEP SKIPPABLE IN SILENCE.
+# On a machine with Docker but no Go the whole `if` was false, so nothing was
+# rebuilt, nothing was repackaged, and nothing was printed — the only warning
+# lived on the build-failed branch INSIDE the if.  The stale schwung-manager
+# already in the tarball was uploaded and the install reported success, so a
+# manager fix could be deployed, confirmed deployed, and still not be running.
+# Same shape as the link-sidecar skip in CLAUDE.md.  The builder now decides
+# for itself how to build (go, else Docker) and fails loudly if it cannot, so
+# there is no toolchain probe here to get wrong.
+if [ "$use_local" = true ] && [ -d "$REPO_ROOT/schwung-manager" ] && [ -d "$REPO_ROOT/build" ]; then
     echo "Rebuilding schwung-manager..."
-    if (cd "$REPO_ROOT/schwung-manager" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o "$REPO_ROOT/build/schwung-manager" -ldflags="-s -w" .); then
+    if "$REPO_ROOT/scripts/build-manager.sh"; then
         "$REPO_ROOT/scripts/package.sh" && echo "Repackaged tarball with fresh schwung-manager"
+    elif [ "${SCHWUNG_ALLOW_STALE_MANAGER:-0}" = "1" ]; then
+        echo "Warning: schwung-manager build failed — SCHWUNG_ALLOW_STALE_MANAGER=1, shipping the tarball's existing binary"
     else
-        echo "Warning: schwung-manager build failed, using existing binary in tarball"
+        fail "schwung-manager build failed. Install a Go toolchain or Docker, or set SCHWUNG_ALLOW_STALE_MANAGER=1 to deploy the stale binary already in the tarball."
     fi
 fi
 

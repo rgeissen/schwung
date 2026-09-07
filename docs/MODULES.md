@@ -470,6 +470,85 @@ That means:
   Task 5). Bump `min_host_version` in your catalog entry if your
   module depends on it.
 
+#### A panel is not the synth's privilege, and it must not open FOLDED
+
+Any component may ship a `web_ui.html` — a MIDI FX and an audio FX get theirs
+rendered inside that component's own section, and a Master FX position gets one
+too. Two rules the client had to learn the hard way, both worth knowing if you
+are authoring a non-synth panel:
+
+- **A section's fold state is DERIVED, not seeded.** It used to be a literal —
+  `collapsed: { synth: false, fx1: true, fx2: true, midi_fx1: true }` — written
+  when every non-synth section was generated rows, where folding saves space.
+  A component that ships a panel is a different thing: folding hides the entire
+  feature behind a one-line disclosure triangle and nothing on screen says a
+  panel is there. Stacks shipped that way and read as "the Remote UI does not
+  work", while the manager was serving the file correctly the whole time and
+  every layer reported success. `sectionCollapsed()` now stores only what the
+  USER chose and derives the rest, because the right default depends on the
+  `custom_ui` message, which arrives *after* the slot state is built.
+- **One draw order, and it is signal flow** (`COMPONENT_ORDER`: midi_fx1,
+  synth, fx1, fx2). The two render paths each carried their own list, so with a
+  custom synth panel loaded the MIDI FX drew LAST — below a panel that measures
+  itself at ~3000px.
+
+And a trap on the panel's own side: the parent sizes your iframe from the
+height you report (`body.scrollHeight`, auto-reported by
+`schwung-remote-api.js`), so **never make a layout decision from a media query
+that reads your own height.** `(orientation:portrait)` is the one to avoid — a
+tall frame reads as portrait, portrait stacks, stacking makes you taller, and
+the taller height is reported straight back. Stacks latched at a 2817px column
+that way. Query `max-width` instead: the parent sets your width, so it cannot
+be fed back, and an iPad held upright is 768–834pt wide and lands under a
+900px breakpoint anyway.
+
+`tests/host/test_remote_ui_panel_visible.sh` pins both client rules.
+
+#### A widget's `viz.extra_keys` reaches the browser too
+
+The knob grid has always read `viz.extra_keys` — the way a widget names a value
+that owns no cell of its own. The Remote UI never did, so a module whose panel
+is *driven* by one worked on the device and went blind in the browser. Stacks
+is the case: its whole progression arrives as the extra key `prog`, so the
+panel drew no chord slots and no add button, with nothing to say why — an
+unfetched key is indistinguishable from an empty one.
+
+Two things had to change in the manager, and the second is the one that hides:
+
+- `chainParam` parses `viz.extra_keys`, and every path that completes an
+  initial value send fetches them. There are **three**, and a fix to only the
+  streaming one is invisible: the `state` fast path returns early.
+- That fast path's test used to be "does `state` parse as a JSON object". A
+  module's state is an OPAQUE save blob, perfectly entitled to be an object
+  without being a param map — stacks returns `{"s": "v6|9|2|..."}`. It parsed,
+  so the fast path "succeeded", pushed one useless key and skipped the sweep of
+  all 53 real params. `stateCoversParams` now requires the snapshot to contain
+  at least one key the component actually declares.
+
+#### One scroller per bank
+
+A capped, independently scrolling box inside a card (`.pick`) is a trap on a
+touch screen. The card is a grid item, so on a shorter screen it is squeezed
+below the box's height and `overflow:hidden` clips it — while the box itself
+has nothing to scroll, because its own content fits its own cap. The bottom of
+the list is then visible-but-unreachable, and dragging it moves the *pane's*
+overscroll, which rubber-bands back on release. Let the list lay out in full
+and give the pane the overflow; also `align-self:start`, or the grid sizes a
+card away from its own content.
+
+#### Two parsers for one wire format will disagree
+
+`canvas_script` is a single standalone script in QuickJS and the panel is an
+HTML page, so this module genuinely cannot share a parser at runtime. The
+copies stay, and `tests/host/test_stacks_prog_parsers_agree.sh` makes them
+answer for each other by RUNNING both over a corpus — not by comparing source
+text, which would fail on formatting and pass on the bug that actually shipped
+(`Number("")` is `0`, `parseInt("")` is `NaN`, so one parser read every rest as
+carrying a note at pitch 0). Anything else derived from a table in the DSP is
+GENERATED rather than retyped: `tools/stacks/gen_shape_families.py` writes the
+shape→family runs into `module.json`, pinned by
+`tests/host/test_stacks_shape_families.sh`.
+
 ### Remote UI for overtake tools (the Tool tab)
 
 Overtake tools (dsp.so loaded by the shim as `overtake_dsp`, not a chain slot)

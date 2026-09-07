@@ -577,17 +577,21 @@ func (ru *RemoteUI) sendInitialParamValues(ctx context.Context, c *ruClient, slo
 	// "1/0 Preset 0" until all individual params arrive.
 	ru.sendHierarchyParams(ctx, c, slot, comp)
 
-	// Fast path: "all" returns every param in one round-trip.
-	if ru.sendAllParamsAtOnce(ctx, c, slot, comp) {
+	// Read the declaration FIRST: it is what tells us whether the "state"
+	// fast path below is really a param map for this component.
+	params := ru.fetchChainParams(slot, comp)
+
+	// Fast path: "state" returns every param in one round-trip.
+	if all, ok := ru.fetchAllParams(slot, comp); ok && stateCoversParams(all, comp, params) {
+		ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: all})
+		ru.logger.Info("initial params: sent via 'state'", "slot", slot, "comp", comp, "count", len(all))
+		if xb := ru.fetchExtraKeysFrom(slot, comp, params); len(xb) > 0 {
+			ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: xb})
+		}
 		return
 	}
 
-	raw, err := ru.shm.GetParam(slot, comp+":chain_params")
-	if err != nil || raw == "" {
-		return
-	}
-	var params []chainParam
-	if json.Unmarshal([]byte(raw), &params) != nil {
+	if len(params) == 0 {
 		return
 	}
 
@@ -621,6 +625,11 @@ func (ru *RemoteUI) sendInitialParamValues(ctx context.Context, c *ruClient, slo
 			// Yield to let shadow_ui.js use the param channel
 			time.Sleep(20 * time.Millisecond)
 		}
+	}
+
+	if xb := ru.fetchExtraKeysFrom(slot, comp, params); len(xb) > 0 {
+		ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: xb})
+		fetched += len(xb)
 	}
 
 	ru.logger.Info("initial params: done", "slot", slot, "comp", comp, "fetched", fetched)
@@ -672,19 +681,6 @@ func (ru *RemoteUI) fetchAllParams(slot uint8, comp string) (map[string]string, 
 	return params, true
 }
 
-// sendAllParamsAtOnce sends a component's full param set to one client in a
-// single param_update. Returns true on success. Modules with many params
-// (e.g. Surge ~280) go from ~10s of fetches to one shm round-trip.
-func (ru *RemoteUI) sendAllParamsAtOnce(ctx context.Context, c *ruClient, slot uint8, comp string) bool {
-	params, ok := ru.fetchAllParams(slot, comp)
-	if !ok {
-		return false
-	}
-	ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: params})
-	ru.logger.Info("initial params: sent via 'state'", "slot", slot, "comp", comp, "count", len(params))
-	return true
-}
-
 // broadcastInitialParamValues sends a component's full param set to every
 // subscriber of a slot, reading shared memory ONCE and fanning the result out —
 // instead of re-reading per client. Avoids redundant heavy shm reads (e.g. the
@@ -696,19 +692,24 @@ func (ru *RemoteUI) broadcastInitialParamValues(ctx context.Context, slot uint8,
 		return
 	}
 	hierParams := ru.fetchHierarchyParams(slot, comp)
+	declared := ru.fetchChainParams(slot, comp)
 	allParams, ok := ru.fetchAllParams(slot, comp)
-	if !ok {
-		// No "state" fast path — fall back to per-client streaming (unchanged).
+	if !ok || !stateCoversParams(allParams, comp, declared) {
+		// No usable "state" fast path — fall back to per-client streaming.
 		for _, c := range clients {
 			ru.sendInitialParamValues(ctx, c, slot, comp)
 		}
 		return
 	}
+	extraParams := ru.fetchExtraKeys(slot, comp)
 	for _, c := range clients {
 		if len(hierParams) > 0 {
 			ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: hierParams})
 		}
 		ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: allParams})
+		if len(extraParams) > 0 {
+			ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: extraParams})
+		}
 	}
 	ru.logger.Info("initial params: sent via 'state' (coalesced)", "slot", slot, "comp", comp, "count", len(allParams), "clients", len(clients))
 }
@@ -1903,6 +1904,125 @@ func (ru *RemoteUI) activeSlotsAndMasterFx() ([]uint8, bool) {
 // chainParam is the minimal structure we parse from chain_params JSON.
 type chainParam struct {
 	Key string `json:"key"`
+	// A widget may NAME a value that owns no cell — `viz.extra_keys` (see
+	// docs/PARAM_PAGES.md). The knob grid has always read these; the Remote
+	// UI never did, so a module whose panel is driven by one went BLIND in
+	// the browser while working perfectly on the device. Stacks is the case:
+	// its whole progression arrives as the extra key "prog", so the browser
+	// panel drew no chord slots and no add button — with nothing to say why,
+	// because an unfetched key is indistinguishable from an empty one.
+	Viz struct {
+		ExtraKeys []string `json:"extra_keys"`
+	} `json:"viz"`
+}
+
+// extraKeysOf collects the distinct viz.extra_keys named across a component's
+// chain_params, in declaration order, minus any key that already has a param
+// of its own (those are fetched by the main loop).
+func extraKeysOf(params []chainParam) []string {
+	declared := make(map[string]bool, len(params))
+	for _, p := range params {
+		if p.Key != "" {
+			declared[p.Key] = true
+		}
+	}
+	seen := make(map[string]bool)
+	var out []string
+	for _, p := range params {
+		for _, k := range p.Viz.ExtraKeys {
+			if k == "" || declared[k] || seen[k] {
+				continue
+			}
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// fetchChainParams reads and parses a component's chain_params declaration.
+func (ru *RemoteUI) fetchChainParams(slot uint8, comp string) []chainParam {
+	raw, err := ru.shm.GetParam(slot, comp+":chain_params")
+	if err != nil || raw == "" {
+		return nil
+	}
+	var params []chainParam
+	if json.Unmarshal([]byte(raw), &params) != nil {
+		return nil
+	}
+	return params
+}
+
+// stateCoversParams reports whether a "state" snapshot is actually a map of
+// THIS component's parameters.
+//
+// The fast path's only test used to be that state started with "{", i.e. that
+// it parsed as a JSON object — and a module's state is an OPAQUE save blob
+// that is perfectly entitled to be an object without being a param map.
+// stacks returns {"s": "v6|9|2|..."}: one key, the whole module packed into a
+// string. That parsed, so the fast path "succeeded", pushed the single key
+// midi_fx1:s, AND RETURNED — skipping the sweep that fetches the 53 real
+// params. The browser therefore had no per-chord values at all; its controls
+// fell back to their range minimums, which reads as "the values are wrong"
+// rather than "the values were never sent", and selecting another chord
+// changed nothing because the refetch took the same path.
+//
+// A real param map contains at least one key the component declares. An
+// undeclarable component (no chain_params) can't be checked, so it keeps the
+// old behaviour rather than losing the fast path.
+func stateCoversParams(values map[string]string, comp string, params []chainParam) bool {
+	if len(params) == 0 {
+		return true
+	}
+	for _, p := range params {
+		if p.Key == "" {
+			continue
+		}
+		if _, ok := values[comp+":"+p.Key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// fetchExtraKeysFrom reads the values of the viz.extra_keys named by a
+// component's chain_params. Split from extraKeysOf so the caller that already
+// parsed chain_params does not read them twice.
+func (ru *RemoteUI) fetchExtraKeysFrom(slot uint8, comp string, params []chainParam) map[string]string {
+	extras := extraKeysOf(params)
+	if len(extras) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(extras))
+	for _, k := range extras {
+		fullKey := comp + ":" + k
+		val, err := ru.shm.GetParam(slot, fullKey)
+		if err != nil {
+			continue
+		}
+		out[fullKey] = val
+	}
+	return out
+}
+
+// fetchExtraKeys is fetchExtraKeysFrom for a caller that has not parsed
+// chain_params — the "state" fast paths, which never look at it.
+//
+// EVERY path that completes an initial value send must call one of these.
+// There are three, and the first fix missed two: the fast path RETURNS EARLY
+// on a module whose "state" is a JSON object, which is precisely the shape
+// stacks has ({"s": "v6|..."}), so the streaming loop — and the extras with
+// it — never ran and the panel got exactly one key.
+func (ru *RemoteUI) fetchExtraKeys(slot uint8, comp string) map[string]string {
+	raw, err := ru.shm.GetParam(slot, comp+":chain_params")
+	if err != nil || raw == "" {
+		return nil
+	}
+	var params []chainParam
+	if json.Unmarshal([]byte(raw), &params) != nil {
+		return nil
+	}
+	return ru.fetchExtraKeysFrom(slot, comp, params)
 }
 
 // pollSlot checks for module/hierarchy changes only (infrequent).
