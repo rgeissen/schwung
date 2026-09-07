@@ -91,6 +91,23 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 .brand{font:800 18px/1 -apple-system,system-ui,sans-serif;letter-spacing:-.02em}
 .brand small{display:block;font:600 8px/1 ui-monospace,monospace;letter-spacing:.24em;
   color:var(--faint);margin-top:5px}
+/*
+ * PLAY THE BUFFER. This drives `preview` (off <-> loop), which free-runs the
+ * progression without Move's transport -- the point being that the panel makes
+ * sound on its own, with the Move across the room. It lived at position 7 of
+ * 12 on the CLIP bank, next to `clear`.
+ *
+ * It reports `preview`, NOT whether anything is sounding: the dot beside the
+ * chips already carries that, and it is the honest one, because a progression
+ * also runs from Move's clock and from a held chord. A button that claimed to
+ * be the whole truth would show Stop for a state it cannot stop.
+ */
+.xport{margin-left:14px;width:38px;height:38px;flex:0 0 auto;border-radius:10px;
+  background:var(--raised);border:1px solid var(--line);color:var(--ink);
+  display:flex;align-items:center;justify-content:center;font-size:13px;
+  transition:background .12s,color .12s,border-color .12s}
+.xport:active{transform:scale(.94)}
+.xport[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:#0B0E13}
 .chips{display:flex;gap:9px;margin-left:auto;align-items:center}
 .chip{padding:5px 10px;border-radius:8px;background:var(--raised);border:1px solid var(--line);
   display:flex;flex-direction:column;gap:3px;min-width:56px}
@@ -337,6 +354,8 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 <div class="left">
   <header class="top">
     <div class="brand">Stacks<small>CHORD PROGRESSIONS</small></div>
+    <button id="xport" class="xport" aria-label="Play the progression"
+            aria-pressed="false"><span id="xportGlyph">&#9654;</span></button>
     <div class="chips">
       <span id="demoBadge" class="demo" hidden>DEMO</span>
       <div class="chip"><b id="sKey">A min</b><span>KEY</span></div>
@@ -613,7 +632,7 @@ function drawRoll(p, now){
     /* PLAYING only means anything while the transport RUNS. `playing` carries
        cur_step, which is 0 when stopped, so chord 1 wore the play tint
        permanently on an idle device. */
-    var w = Math.max(6, x1 - x0), sel = (i === p.sel-1),
+    var w = Math.max(6, x1 - x0), sel = (i === selIndex(p)-1),
         play = p.running && (i === p.playing);
     hits.push({ i:i, x:x0, w:w });
 
@@ -682,6 +701,21 @@ function drawRoll(p, now){
     cx.beginPath(); cx.moveTo(px, TOP-8); cx.lineTo(px, BOT+6); cx.stroke(); cx.restore();
   }
 }
+/*
+ * THE SELECTION IS DRAWN FROM WHAT YOU TAPPED, not from the round trip.
+ *
+ * `prog.sel` is authoritative but arrives with the next publish: set() writes
+ * the value locally and the module echoes it back a moment later. Drawing only
+ * from prog meant the highlight, the strip card and the CHORD bank's scope
+ * lagged the tap visibly. The local value is what the user just asked for, so
+ * it leads; prog corrects it if the module disagrees (a clamp, an insert).
+ */
+function selIndex(p){
+  var local = parseInt(get("sel"), 10);
+  if (isFinite(local) && local >= 1 && (!p || local <= p.count)) return local;
+  return p ? p.sel : 1;
+}
+
 var aMs = 0, aU = 0;
 function reanchor(p){ aMs = performance.now(); aU = p ? p.posUnits : 0; }
 function playhead(p, now){
@@ -701,7 +735,7 @@ function drawStrip(p){
      that CREATES a chord is exactly the control an empty panel needs. */
   (p ? p.chords : []).forEach(function(c, i){
     var b = document.createElement("button");
-    b.className = "card" + (i===p.sel-1?" sel":"") + (i===p.playing?" playing":"")
+    b.className = "card" + (i===selIndex(p)-1?" sel":"") + (i===p.playing?" playing":"")
                 + (c.rest?" rest":"") + (c.mute?" muted":"");
     b.innerHTML = '<span class="nm">'+(c.rest?"—":esc(c.name))+'</span>'
                 + '<span class="ln">'+lenLabel(c.len, p.stepUnits)+(c.mute?" · MUTED":"")+'</span>';
@@ -779,7 +813,9 @@ var BANKS = [
   { id:"feel",  name:"FEEL",  scope:"prog",
     keys:["octave","velocity","gate","swing","hum_vel","roll_vel","hum_time","roll_time"] },
   { id:"clip",  name:"CLIP",  scope:"prog",
-    keys:["read","read_mode","stamp","stamp_mode","clear","lanes","preview","run",
+    /* `preview` moved to the header transport button; `run` stays, it is a
+       mode (follow Move's clock) rather than a transport. */
+    keys:["read","read_mode","stamp","stamp_mode","clear","lanes","run",
           "duplicate","stretch","compress","undo"] },
 ];
 var bank = "chord";
@@ -1204,10 +1240,11 @@ function buildPane(){
   var B = BANKS.filter(function(x){ return x.id === bank; })[0];
   if (!B) return;
   var sc = document.getElementById("scope");
-  var selName = prog && prog.chords[prog.sel-1] ? prog.chords[prog.sel-1].name : "";
+  var si = selIndex(prog);
+  var selName = prog && prog.chords[si-1] ? prog.chords[si-1].name : "";
   sc.className = "scope " + (B.scope === "chord" ? "chord" : "prog");
   sc.textContent = B.scope === "chord"
-    ? "● CHORD " + (prog ? prog.sel : 1) + (selName ? " · " + selName : "")
+    ? "● CHORD " + si + (selName ? " · " + selName : "")
     : "● WHOLE PROGRESSION";
   /*
    * THE SIGNATURE MUST INCLUDE WHICH KEYS HAVE METADATA, not just their values.
@@ -1225,7 +1262,7 @@ function buildPane(){
   var ready = B.keys.filter(function(k){ return !!META[k]; });
   /* Family decides which shapes the picker lists, so it is part of the DOM's
      inputs even on a bank that does not render it. */
-  var sig = bank + "|" + (prog ? prog.sel : 0) + "|" + browseFamIndex() + "|" +
+  var sig = bank + "|" + si + "|" + browseFamIndex() + "|" +
             ready.join("+") + "|" +
             B.keys.map(function(k){ return k + "=" + get(k); }).join(",");
   if (sig === paneSig) return;
@@ -1268,6 +1305,7 @@ function render(){
     document.getElementById("sLive").className = "live" + (prog.running ? " on" : "");
     document.getElementById("hint").hidden = !prog.chords.every(function(c){ return c.rest; });
   }
+  paintTransport();
   drawStrip(prog);
   buildPane();
 }
@@ -1277,6 +1315,22 @@ cv.addEventListener("pointerdown", function(e){
   for (var i = 0; i < hits.length; i++)
     if (x >= hits[i].x && x <= hits[i].x + hits[i].w){ set("sel", hits[i].i+1); holdOn(); return; }
 });
+
+/* Play/stop the buffer. `preview` is an enum, so the value is a word. */
+(function(){
+  var btn = document.getElementById("xport");
+  btn.onclick = function(){
+    var on = String(get("preview")) === "loop";
+    set("preview", on ? "off" : "loop");
+  };
+})();
+function paintTransport(){
+  var on = String(get("preview")) === "loop";
+  var btn = document.getElementById("xport");
+  btn.setAttribute("aria-pressed", String(on));
+  btn.setAttribute("aria-label", on ? "Stop the progression" : "Play the progression");
+  document.getElementById("xportGlyph").innerHTML = on ? "&#9632;" : "&#9654;";
+}
 
 /* ═══════════════════════════════ boot ═════════════════════════ */
 buildTabs();

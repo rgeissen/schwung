@@ -595,6 +595,16 @@ func (ru *RemoteUI) sendInitialParamValues(ctx context.Context, c *ruClient, slo
 		return
 	}
 
+	// EXTRAS FIRST. A viz extra key is what a module's own drawing is made of
+	// -- for stacks the whole progression arrives as `prog`, so the roll, the
+	// chord strip and the playhead cannot paint without it. Fetched after the
+	// 53-param sweep it landed ~300ms late and the picture visibly lagged the
+	// selection. The ordinary controls can populate a beat later; the picture
+	// is the thing being looked at.
+	if xb := ru.fetchExtraKeysFrom(slot, comp, params); len(xb) > 0 {
+		ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: xb})
+	}
+
 	ru.logger.Info("initial params: fetching", "slot", slot, "comp", comp, "count", len(params))
 
 	// Fetch in batches of 8, yielding between batches so shadow_ui.js
@@ -625,11 +635,6 @@ func (ru *RemoteUI) sendInitialParamValues(ctx context.Context, c *ruClient, slo
 			// Yield to let shadow_ui.js use the param channel
 			time.Sleep(20 * time.Millisecond)
 		}
-	}
-
-	if xb := ru.fetchExtraKeysFrom(slot, comp, params); len(xb) > 0 {
-		ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: xb})
-		fetched += len(xb)
 	}
 
 	ru.logger.Info("initial params: done", "slot", slot, "comp", comp, "fetched", fetched)
@@ -706,10 +711,10 @@ func (ru *RemoteUI) broadcastInitialParamValues(ctx context.Context, slot uint8,
 		if len(hierParams) > 0 {
 			ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: hierParams})
 		}
-		ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: allParams})
 		if len(extraParams) > 0 {
 			ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: extraParams})
 		}
+		ru.writeJSON(ctx, c, wsParamUpdate{Type: "param_update", Slot: slot, Params: allParams})
 	}
 	ru.logger.Info("initial params: sent via 'state' (coalesced)", "slot", slot, "comp", comp, "count", len(allParams), "clients", len(clients))
 }
@@ -815,7 +820,15 @@ func (ru *RemoteUI) handleSetParam(ctx context.Context, c *ruClient, msg wsMessa
 	if len(parts) == 2 {
 		comp := parts[0]
 		paramKey := parts[1]
-		if paramKey == "preset" || paramKey == "preset_index" || strings.HasSuffix(paramKey, "_index") {
+		// A SELECTION KEY IS NOT A GESTURE. The debounce below exists so a
+		// knob DRAG produces one sweep at the end instead of one per sample.
+		// Pointing at a different item is a single discrete act whose whole
+		// purpose is to fetch that item's values, so waiting 250ms and then
+		// sweeping means the panel shows the PREVIOUS item's numbers for
+		// half a second. `sel` is stacks' selected chord; the preset keys
+		// were already here for the same reason.
+		if paramKey == "preset" || paramKey == "preset_index" || paramKey == "sel" ||
+			strings.HasSuffix(paramKey, "_index") {
 			go func() {
 				time.Sleep(50 * time.Millisecond) // Let the plugin process the change
 				// Read shm once and fan out to all subscribers of this slot.
