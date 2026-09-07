@@ -947,6 +947,88 @@
         "first": 32,
         "count": 6
       }
+    ],
+    "genre_progressions": [
+      {
+        "name": "none",
+        "first": 0,
+        "count": 1
+      },
+      {
+        "name": "Pop",
+        "first": 1,
+        "count": 6
+      },
+      {
+        "name": "Rock",
+        "first": 7,
+        "count": 4
+      },
+      {
+        "name": "Metal",
+        "first": 11,
+        "count": 4
+      },
+      {
+        "name": "Jazz",
+        "first": 15,
+        "count": 8
+      },
+      {
+        "name": "Blues",
+        "first": 23,
+        "count": 4
+      },
+      {
+        "name": "Soul",
+        "first": 27,
+        "count": 4
+      },
+      {
+        "name": "Gospel",
+        "first": 31,
+        "count": 4
+      },
+      {
+        "name": "Funk",
+        "first": 35,
+        "count": 4
+      },
+      {
+        "name": "R&B",
+        "first": 39,
+        "count": 3
+      },
+      {
+        "name": "Bossa",
+        "first": 42,
+        "count": 4
+      },
+      {
+        "name": "Latin",
+        "first": 46,
+        "count": 3
+      },
+      {
+        "name": "House",
+        "first": 49,
+        "count": 4
+      },
+      {
+        "name": "Reggae",
+        "first": 53,
+        "count": 3
+      },
+      {
+        "name": "Country",
+        "first": 56,
+        "count": 2
+      },
+      {
+        "name": "Cinematic",
+        "first": 58,
+        "count": 6
+      }
     ]
   },
   "ui_hierarchy": {

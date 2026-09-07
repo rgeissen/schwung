@@ -594,9 +594,13 @@ answer for each other by RUNNING both over a corpus — not by comparing source
 text, which would fail on formatting and pass on the bug that actually shipped
 (`Number("")` is `0`, `parseInt("")` is `NaN`, so one parser read every rest as
 carrying a note at pitch 0). Anything else derived from a table in the DSP is
-GENERATED rather than retyped: `tools/stacks/gen_shape_families.py` writes the
-shape→family runs into `module.json`, pinned by
-`tests/host/test_stacks_shape_families.sh`.
+GENERATED rather than retyped: `tools/stacks/gen_ui_runs.py` writes both grouping
+tables into `module.json` — shape→family and genre→progression — pinned by
+`tests/host/test_stacks_ui_runs.sh`. Two pickers narrow a long list by a
+shorter one beside it, and both groupings already exist in C as contiguous
+runs, so neither boundary is retyped into the panel. They filter differently on
+purpose: Shape Family is CUMULATIVE (a 7th contains a triad), Genre is
+EXCLUSIVE (Rock does not contain Pop).
 
 ### Remote UI for overtake tools (the Tool tab)
 

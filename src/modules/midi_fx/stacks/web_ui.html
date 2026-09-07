@@ -368,6 +368,16 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 .step{display:flex;align-items:center;gap:5px}
 .step button{flex:0 0 36px;height:38px;border-radius:8px;border:1px solid var(--line);
   background:#0F151E;color:var(--ink);font:700 17px/1 -apple-system,system-ui,sans-serif}
+/*
+ * A THIRD-WIDTH CARD CANNOT AFFORD TWO 36px BUTTONS. Inversion, Length and
+ * Offset share one row, so each card is ~98px inside its padding: 36+36 and
+ * the gaps left about 16px for the value, which clipped it to a sliver -- the
+ * control showed its two buttons and not the number they change. The buttons
+ * give the width back here; they stay comfortably tappable and the value gets
+ * roughly twice the room.
+ */
+.ctl.third .step{gap:3px}
+.ctl.third .step button{flex:0 0 27px;height:34px;font-size:15px}
 .step button:active{background:var(--gold);color:#0B0E13}
 .step button[disabled]{opacity:.3}
 .step span{flex:1;min-width:0;text-align:center;color:var(--gold);
@@ -473,13 +483,42 @@ if (window.self !== window.top) {
  * If the fetch fails the picker falls back to ALL shapes -- degraded, never
  * wrong: a missing filter shows too much, a guessed one shows the wrong notes.
  */
-var FAMILY_RUNS = null;
+var FAMILY_RUNS = null, GENRE_RUNS = null;
 fetch("module.json").then(function(r){ return r.ok ? r.json() : null; })
   .then(function(m){
-    var runs = m && m.capabilities && m.capabilities.shape_families;
-    if (runs && runs.length){ FAMILY_RUNS = runs; paneSig = null; render(); }
+    var caps = (m && m.capabilities) || {};
+    var got = false;
+    if (caps.shape_families && caps.shape_families.length){
+      FAMILY_RUNS = caps.shape_families; got = true;
+    }
+    if (caps.genre_progressions && caps.genre_progressions.length){
+      GENRE_RUNS = caps.genre_progressions; got = true;
+    }
+    if (got){ paneSig = null; render(); }
   })
-  .catch(function(){ /* keep FAMILY_RUNS null: show every shape */ });
+  .catch(function(){ /* keep both null: show every shape and every preset */ });
+
+/*
+ * The presets a genre owns, or null for "show everything".
+ *
+ * EXCLUSIVE, unlike Shape Family. Genres are not degrees of the same thing --
+ * Rock does not contain Pop the way a 7th contains a triad -- so a cumulative
+ * list would be arbitrary in its order and would put 64 presets under
+ * Cinematic. `none` is the genre of the "none" preset and means no filter.
+ */
+function presetsInGenre(opts){
+  if (!GENRE_RUNS) return null;
+  var g = String(get("genre") || "");
+  if (!g || g === "none") return null;
+  for (var i = 0; i < GENRE_RUNS.length; i++){
+    var r = GENRE_RUNS[i];
+    if (r.name !== g) continue;
+    var end = r.first + r.count;
+    if (r.first < 0 || end > opts.length) return null;
+    return opts.slice(r.first, end);
+  }
+  return null;
+}
 
 /*
  * HOW DEEP THE LIST GOES IS THE USER'S CHOICE, AND IT ONLY EVER RISES ON ITS
@@ -1232,6 +1271,13 @@ function listControl(k){
   if (k === "family" && FAMILY_RUNS){
     var bi = browseFamIndex();
     if (bi >= 0) cur = FAMILY_RUNS[bi].name;
+  }
+  if (k === "progression" && GENRE_RUNS){
+    var pg = presetsInGenre(opts);
+    /* Keep the loaded preset visible even if Genre has moved on, or the list
+       shows no pressed entry and reads as broken. */
+    if (pg && pg.indexOf(cur) < 0 && opts.indexOf(cur) >= 0) pg = pg.concat([cur]);
+    if (pg) opts = pg;
   }
   if (k === "shape"){
     var fam = shapesInFamily(opts);
