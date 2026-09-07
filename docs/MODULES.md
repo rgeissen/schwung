@@ -602,6 +602,24 @@ by Move at 12:09 with the notes gone. That is why `stamp_mode` defaults to
 **rec arm**. `write file` is opt-in and only safe when Move will not write that
 set before you reload it.
 
+#### A module cannot press Move's Record, and the reason is Schwung
+
+Worth recording so it is not re-attempted from the same reasoning. Writing the
+active set's `Song.abl` cannot win — measured, a spliced file was overwritten
+by Move 142 seconds later with nothing touched — so the only route into the
+live set is Move's own recorder, and pressing it from the module looks like the
+fix.
+
+The injection half works: `midi_inject_to_move` accepts
+`{0x0B, 0xB0, 118, 127}` on cable 0, byte-identical to the track tap the shim
+injects itself, and the shim logs `MIDI inject: drained 2 pkts`.
+
+What defeats it is **Schwung, not Move**. CC 118 is the Sample/Record button
+and the shim claims it before Move sees it, so the injected press opens the
+Quantized Sampler's fullscreen screen instead of arming a clip. A module cannot
+mark an injected packet as "mine, pass it through", so any fix belongs in the
+shim's input path, not in a module.
+
 #### The lap begins on Move's downbeat, not on the button press
 
 `stamp` in rec-arm mode used to set `pulse = 0` the instant it was pressed,

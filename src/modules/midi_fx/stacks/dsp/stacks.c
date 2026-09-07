@@ -1518,6 +1518,31 @@ static int humanised_velocity(const stk_t *st, int chord, int voice) {
 }
 
 /*
+ * WHY THIS MODULE DOES NOT PRESS MOVE'S RECORD BUTTON.
+ *
+ * It was tried, and the attempt is worth recording so it is not tried again.
+ * The reasoning was sound: the only way a clip reaches the LIVE set is Move's
+ * own recorder, because Move holds the set in memory and autosaves over the
+ * file -- measured, a spliced Song.abl was overwritten 142 seconds later with
+ * nothing touched. So writing the file cannot win, and pressing record can.
+ *
+ * The injection works. `midi_inject_to_move` accepts { 0x0B, 0xB0, 118, 127 }
+ * on cable 0 -- byte-identical to the track tap the shim itself injects at
+ * schwung_shim.c -- and the shim logs "MIDI inject: drained 2 pkts", so the
+ * packets reach MIDI_IN.
+ *
+ * WHAT DEFEATS IT IS SCHWUNG, NOT MOVE. CC 118 is the Sample/Record button,
+ * and the shim CLAIMS it before Move sees it: the injected press opened the
+ * Quantized Sampler's fullscreen screen on the device instead of arming a
+ * clip. A module cannot tell the shim "this press is mine, pass it through" --
+ * there is no marker on an injected packet -- so any fix lives in the shim,
+ * not here.
+ *
+ * Until then the lap is ARMED and Move's transport starts it (see the clock
+ * handler). That costs one button press on the hardware and works.
+ */
+
+/*
  * HOW LOUD ONE NOTE IS, in one place.
  *
  * humanised_velocity() answers a DEVIATION around the global velocity; it does
@@ -3516,6 +3541,8 @@ static void stk_set_param_inner(void *instance, const char *key, const char *val
                     /* No clock to follow yet: the next Start begins the lap. */
                     st->run = 0;
                 }
+                /* No record injection -- see press_move_record's obituary
+                   above: CC 118 is claimed by the shim's sampler. */
             }
         }
     } else if (strcmp(key, "clear") == 0) {

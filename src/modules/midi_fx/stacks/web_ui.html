@@ -1619,6 +1619,9 @@ function paintStatus(){
   if (armedNow()){
     el.hidden = false;
     el.className = "stat working";
+    /* The module presses Move's record itself now; if that press does not
+       land, arming still holds and the user can press it -- so the wording
+       says what is being waited for, not what the user must do. */
     el.textContent = "ARMED \u00B7 PRESS RECORD";
     return;
   }
