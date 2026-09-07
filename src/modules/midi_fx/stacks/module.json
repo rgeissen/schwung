@@ -33,7 +33,8 @@
         "viz": {
           "kind": "custom:stkstaff",
           "extra_keys": [
-            "prog"
+            "prog",
+            "status"
           ]
         }
       },

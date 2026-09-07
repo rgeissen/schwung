@@ -541,6 +541,31 @@ audits every bank at four viewport sizes for overlap, clipping, escape, a
 last-card that scrolling cannot reach, and nested scrollers. Each of those
 checks exists because that fault shipped.
 
+#### A long action must report, and the report belongs to the ACTION
+
+Read Clip and Stamp Clip hand their work to a worker thread and return
+immediately — that is the realtime rule, not a shortcut — so `status`
+(`idle`/`working`/`ok`/`failed`) becomes its verdict some time *after* the write
+that started it. The host re-reads a component's params once, ~250ms after a
+write, so a panel that reads it then always reads it too early: the button
+reports nothing and a failure looks exactly like a success. Poll with
+`resubscribe()` while a job could be in flight.
+
+Then display it against the ACTION, not the value. `status` **latches** — it
+stays `ok` until the next job begins — so keying the display on the value
+changing means a second successful stamp shows nothing at all, `ok → ok` being
+no change. The window opens when the user presses something and closes a few
+seconds after the module answers, with a timeout so a module that never
+answers doesn't pin `WORKING` on screen forever.
+
+#### Stamp means two different things, and the button must say which
+
+`stamp_mode` defaults to **rec arm**, which writes no file: it restarts the
+progression and plays ONE LAP for Move to record into an armed track. Pressed
+with nothing armed it is silent, and is indistinguishable from a broken stamp —
+which is exactly what it was taken for. Only `write file` splices `Song.abl`.
+The button is labelled from the mode.
+
 #### An action is the button, not a card containing its own name
 
 A write-trigger rendered as a labelled card holding a button says the name

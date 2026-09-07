@@ -121,6 +121,22 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
  * copies the chord you are on, and a button that silently does nothing is
  * worse than a button that says it cannot.
  */
+/*
+ * THE ONLY REPORT A LONG ACTION MAKES. Read Clip and Stamp Clip hand work to a
+ * worker thread and answer immediately, so the button press told you nothing
+ * and a failure was indistinguishable from a success -- the module has always
+ * known (`status` is idle/working/ok/failed) and nothing ever asked. It rides
+ * in on viz.extra_keys beside `prog`.
+ *
+ * Shown only while it has something to say: `working`, and the verdict for a
+ * few seconds after. `idle` is not news.
+ */
+.stat{margin-left:10px;padding:5px 9px;border-radius:8px;flex:0 0 auto;
+  font:700 9px/1 ui-monospace,monospace;letter-spacing:.14em;
+  background:var(--raised);border:1px solid var(--line);color:var(--dim)}
+.stat.working{color:var(--gold);border-color:#3A2E1C}
+.stat.ok{color:#4FD1E0;border-color:#1D3A40}
+.stat.failed{color:var(--warn);border-color:#4A2020}
 .acts{display:flex;gap:6px;margin-left:10px;align-items:center}
 .act{width:38px;height:38px;flex:0 0 auto;border-radius:10px;
   background:var(--raised);border:1px solid var(--line);color:var(--dim);
@@ -419,6 +435,7 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
         already carries the other half of the pair -- its "+" is how a chord is
         added -- so the counterpart reads without a legend.
       -->
+      <span id="stat" class="stat" role="status" aria-live="polite" hidden></span>
       <button id="actDel" class="act warn" aria-label="Remove the selected chord"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M6 12h12"/>
       </svg></button>
@@ -1357,9 +1374,23 @@ function sliderControl(k){
 function actionControl(k){
   var b = document.createElement("button");
   b.className = "ctl act-btn half" + (/clear|remove/.test(k) ? " warn" : "");
-  b.textContent = (name(k) || k).toUpperCase();
-  b.setAttribute("aria-label", name(k) || k);
-  b.onclick = function(){ set(k, "on"); };
+  /*
+   * STAMP MEANS TWO DIFFERENT THINGS and the button said one word for both.
+   * In `write file` it splices the clip into Song.abl. In `rec arm` -- the
+   * DEFAULT -- it writes no file at all: it restarts the progression and plays
+   * ONE LAP for Move to record into an armed track. Pressing it with nothing
+   * armed is silent and looks exactly like a broken stamp, which is what it
+   * was taken for. The label says which one you are about to get.
+   */
+  var label = name(k) || k;
+  if (k === "stamp" && String(get("stamp_mode")) === "rec arm")
+    label = "Play 1 lap to rec";
+  b.textContent = label.toUpperCase();
+  b.setAttribute("aria-label", label);
+  b.onclick = function(){
+    set(k, "on");
+    if (k === "stamp" || k === "read"){ noteJobStarted(); pollStatus(); }
+  };
   return b;
 }
 
@@ -1402,6 +1433,7 @@ function buildPane(){
    * makes the arrival of metadata a change.
    */
   var ready = B.keys.filter(function(k){ return !!META[k]; });
+  /* stamp_mode renames the stamp button, so it is an input to the DOM. */
   /* Family decides which shapes the picker lists, so it is part of the DOM's
      inputs even on a bank that does not render it. */
   var sig = bank + "|" + si + "|" + browseFamIndex() + "|" +
@@ -1451,16 +1483,44 @@ function render(){
     document.getElementById("hint").hidden = !prog.chords.every(function(c){ return c.rest; });
   }
   paintTransport();
+  paintStatus();
   drawStrip(prog);
   buildPane();
 }
-(function frame(){ drawRoll(prog, performance.now()); requestAnimationFrame(frame); })();
+(function frame(){ drawRoll(prog, performance.now()); paintStatus();
+                   requestAnimationFrame(frame); })();
 cv.addEventListener("pointerdown", function(e){
   var r = cv.getBoundingClientRect(), x = e.clientX - r.left;
   for (var i = 0; i < hits.length; i++)
     if (x >= hits[i].x && x <= hits[i].x + hits[i].w){
       selPending = hits[i].i+1; set("sel", hits[i].i+1); holdOn(); return; }
 });
+
+/*
+ * A LONG ACTION NEEDS TO BE ASKED AGAIN.
+ *
+ * Read Clip and Stamp Clip hand the work to a worker thread and return at once
+ * -- that is the realtime rule, not a shortcut -- so `status` becomes "working"
+ * and then "ok"/"failed" some time AFTER the write that started it. The host
+ * re-reads a component's params once, ~250ms after a write, so the panel asked
+ * exactly once and always too early: the button reported nothing and a failure
+ * looked identical to a success.
+ *
+ * So poll while a job could be in flight. resubscribe() asks the host for a
+ * fresh read; a handful of them over a few seconds costs nothing next to a
+ * file splice, and stops as soon as the verdict lands.
+ */
+function pollStatus(){
+  if (!R || !R.resubscribe) return;
+  var tries = 0;
+  (function again(){
+    /* Stop once the verdict has been RECORDED for this job -- not merely once
+       `status` reads ok, which it may already have from the previous one. */
+    if (tries++ > 14 || jobDone) return;
+    R.resubscribe();
+    setTimeout(again, 400);
+  })();
+}
 
 /* Undo / redo / delete. Write triggers: the value is the word "on". */
 (function(){
@@ -1492,6 +1552,39 @@ var XP_PLAY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColo
   + 'aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>';
 var XP_STOP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" '
   + 'aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>';
+/*
+ * THE VERDICT BELONGS TO THE ACTION, NOT TO THE VALUE.
+ *
+ * `status` LATCHES -- it stays "ok" until the next job starts -- so keying the
+ * display on the value changing meant a second successful stamp displayed
+ * nothing at all: ok -> ok is not a change. The first attempt reported only
+ * transitions, which is precisely the case that does not need reporting.
+ *
+ * So the window opens when YOU press something and closes a few seconds after
+ * the module has answered. Two presses in a row each get their own report,
+ * whatever the value did in between.
+ */
+var jobAt = 0, jobDone = 0;
+var STAT_HOLD_MS = 3500, JOB_MAX_MS = 20000;
+function noteJobStarted(){ jobAt = Date.now(); jobDone = 0; }
+function paintStatus(){
+  var el = document.getElementById("stat");
+  if (!el) return;
+  if (!jobAt){ el.hidden = true; return; }
+  var v = String(get("status") || "");
+  var now = Date.now();
+  if ((v === "ok" || v === "failed") && !jobDone) jobDone = now;
+  /* Give up rather than sit on WORKING forever if the module never answers. */
+  if (!jobDone && now - jobAt > JOB_MAX_MS){ jobAt = 0; el.hidden = true; return; }
+  if (jobDone && now - jobDone > STAT_HOLD_MS){ jobAt = 0; el.hidden = true; return; }
+  var shown = jobDone ? v : "working";
+  el.hidden = false;
+  el.className = "stat " + shown;
+  el.textContent = shown === "working" ? "WORKING"
+                 : shown === "ok"      ? "DONE"
+                 : "FAILED";
+}
+
 function paintTransport(){
   /* Delete is refused at one chord by the module; say so rather than no-op. */
   var del = document.getElementById("actDel");

@@ -133,8 +133,17 @@ if re.search(r'\b(rand|random|srand|drand48)\s*\(', code):
 viz = cp['sel'].get('viz', {})
 if viz.get('kind') != 'custom:stkstaff':
     bad.append("sel declares no custom:stkstaff viz kind")
-if viz.get('extra_keys') != ['prog']:
-    bad.append("sel's viz does not carry extra_keys ['prog']")
+# `prog` is the whole progression and `status` is the verdict of a long
+# action -- a stamp or a clip read runs on the worker thread and answers
+# later, so without it a failure is indistinguishable from a success. Both
+# are values a widget NAMES without owning a cell, which is what extra_keys
+# is for; the cap is four.
+ek = viz.get('extra_keys') or []
+for want in ('prog', 'status'):
+    if want not in ek:
+        bad.append("sel's viz.extra_keys is missing %r (has %r)" % (want, ek))
+if len(ek) > 4:
+    bad.append("sel's viz.extra_keys exceeds the cap of four: %r" % (ek,))
 canvas = open('src/modules/midi_fx/stacks/canvas.js').read()
 if 'custom:stkstaff' not in canvas:
     bad.append("canvas.js registers no custom:stkstaff widget")
