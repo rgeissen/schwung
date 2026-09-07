@@ -259,22 +259,24 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 .seg button:active{transform:scale(.94)}
 .seg button.off{opacity:.28;pointer-events:none}
 /*
- * ONE SCROLLER PER BANK, AND IT IS THE PANE.
+ * A LONG LIST SCROLLS INSIDE ITS OWN CELL, so every cell on the bank stays in
+ * view and only the one with more content moves.
  *
- * This used to be a capped, independently scrolling box inside the card. Two
- * things went wrong with that, both only on a shorter screen: the card is a
- * grid item and got squeezed below the box's height, and `.ctl{overflow:hidden}`
- * then CLIPPED the box -- while the box itself had nothing to scroll, because
- * its own content fitted its own 195px. So the bottom of the list was
- * unreachable, and dragging it moved the pane's overscroll instead, which
- * rubber-banded back on release. A scroller you can see past but not scroll to
- * is worse than a long list.
+ * This was removed once, and that was a fix aimed at the wrong thing. The
+ * rubber-band came from `grid-auto-rows: auto` sizing a row SHORTER than the
+ * card in it: `.ctl{overflow:hidden}` then clipped the scroller, which itself
+ * had nothing to scroll because its own content fitted its own cap. So the
+ * list was visible past the edge and unreachable, and the drag moved the
+ * pane's overscroll. With min-content rows the card always holds its scroller,
+ * and the scroller does its job.
  *
- * The list now lays out in full and the PANE scrolls, which it already did.
- * Nested scrollers on a touch screen are a fight over the same gesture anyway.
+ * The cap is what buys the behaviour: without it the cell grows to its content
+ * and pushes the rest of the bank off the screen, which is what makes you
+ * scroll the whole pane to reach a control you could otherwise see.
  */
-.pick{border-radius:8px;background:#0C1119;
-  padding:5px;border:1px solid #1B222C}
+.pick{max-height:168px;overflow-y:auto;border-radius:8px;background:#0C1119;
+  padding:5px;border:1px solid #1B222C;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain}
 .slide{position:relative;height:27px;border-radius:8px;background:#0F151E;
   border:1px solid var(--line);overflow:hidden;touch-action:none}
 .slide i{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,#3A2E1C,var(--gold));opacity:.9}
@@ -290,8 +292,12 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 
 /* ── bespoke controls ────────────────────────────────────────── */
 /* RHYTHM: the figure, as the hits it plays */
-/* Same rule as .pick: no nested scroller, the pane carries the overflow. */
-.rlist{display:flex;flex-direction:column;gap:3px}
+/* Same rule as .pick: capped, scrolls in place, so the cells below stay put.
+   overscroll-behavior:contain stops a flick that reaches the end from being
+   handed to the pane, which is what makes two nested scrollers feel like a
+   fight over one gesture. */
+.rlist{display:flex;flex-direction:column;gap:3px;max-height:150px;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .rrow{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;
   background:#0F151E;border:1px solid transparent;min-height:23px}
 /* The LABEL may shrink and ellipsis; the PATTERN may not -- it is the

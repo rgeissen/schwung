@@ -1231,9 +1231,11 @@ any `state` that parsed as a JSON object, which an opaque save blob
 `parseProg` over one corpus (`Number("")` is 0, `parseInt("")` is NaN — that
 divergence drew a phantom note on every rest), and anything else derived from
 a DSP table is generated (`tools/stacks/gen_shape_families.py`) rather than
-retyped. **One scroller per bank**: a capped scroller inside a grid card is
-squeezed below its own content and clipped, leaving a list you can see past
-and cannot reach. `docs/MODULES.md`.
+retyped. **A long list scrolls inside its own cell**, so the rest of the bank stays in
+view — and the invariant to check is not "no nested scrollers" but that a
+scroller is never CLIPPED by its card and can reach its end. Banning them was
+a fix aimed at the symptom: the rubber-band came from `grid-auto-rows: auto`
+sizing a row shorter than the card in it. `docs/MODULES.md`.
 
 **`install.sh` rebuilt the manager only if local `go` existed, and skipped it in
 SILENCE otherwise** — the lone warning sat on the build-failed branch *inside*

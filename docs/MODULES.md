@@ -541,16 +541,26 @@ audits every bank at four viewport sizes for overlap, clipping, escape, a
 last-card that scrolling cannot reach, and nested scrollers. Each of those
 checks exists because that fault shipped.
 
-#### One scroller per bank
+#### A long list scrolls inside its own cell
 
-A capped, independently scrolling box inside a card (`.pick`) is a trap on a
-touch screen. The card is a grid item, so on a shorter screen it is squeezed
-below the box's height and `overflow:hidden` clips it — while the box itself
-has nothing to scroll, because its own content fits its own cap. The bottom of
-the list is then visible-but-unreachable, and dragging it moves the *pane's*
-overscroll, which rubber-bands back on release. Let the list lay out in full
-and give the pane the overflow; also `align-self:start`, or the grid sizes a
-card away from its own content.
+Cap it and let it scroll in place, so every cell on the bank stays in view and
+only the one with more content moves. Removing the cap makes that cell grow to
+its content and push the rest of the bank off screen, which forces you to
+scroll the whole pane to reach a control you could otherwise see.
+
+This was banned once, and the ban was aimed at the wrong thing. The
+rubber-band — a list visible past the cell's edge that no drag could reach, the
+gesture landing on the pane's overscroll and springing back — came from
+`grid-auto-rows: auto` sizing a row SHORTER than the card in it, so
+`overflow:hidden` clipped the scroller while the scroller itself had nothing to
+scroll. With `min-content` rows the card always holds its scroller. Give the
+scroller `overscroll-behavior: contain` as well, or a flick that reaches the
+end is handed to the pane, which is what makes two nested scrollers feel like
+one gesture being fought over.
+
+The invariant worth checking is not "no nested scrollers" — it is that a
+scroller is never clipped by its card and can always reach its end and its last
+item. `tools/stacks/check_panel_layout.py` asserts exactly that.
 
 #### One question, one function: how loud is this note
 

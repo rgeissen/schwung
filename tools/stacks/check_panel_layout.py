@@ -12,7 +12,8 @@ Checks, per bank and per viewport size:
   clipped   a card shorter than its own content (overflow:hidden eats it)
   escape    a card wider than the pane, or the page taller than the viewport
   reach     the LAST control is reachable after scrolling the pane
-  nested    a scroller inside a card (they fight the pane for the gesture)
+  scroller  a cell's own scroller clipped by its card, or unable to reach
+            its end / its last item (the rubber-band failure)
 
 Run:  tools/stacks/check_panel_layout.py <host> [--sizes 1180x690,1180x560]
 Exit non-zero on any fault, with the offending card named.
@@ -128,12 +129,39 @@ AUDIT = r"""
       var vx = Math.min(a.right,b.right) - Math.max(a.left,b.left);
       if (vy > 1 && vx > 1) faults.push('overlap: '+a.k+' / '+b.k+' ('+vy+'px)');
     }
-    var nested = 0;
-    [].forEach.call(p.querySelectorAll('*'), function(e){
-      if (e.scrollHeight - e.clientHeight > 2 &&
-          /auto|scroll/.test(getComputedStyle(e).overflowY)) nested++;
+    /*
+     * A scroller INSIDE a cell is wanted -- it keeps every cell on the bank in
+     * view while the long one moves on its own. What must never happen is the
+     * card clipping it: then the list is visible past the edge and unreachable,
+     * the drag lands on the pane's overscroll, and it springs back. That was
+     * once "fixed" by banning nested scrollers, which was aimed at the symptom;
+     * the cause was row sizing. So the check is the real invariant.
+     */
+    [].forEach.call(p.querySelectorAll('[data-scroll]'), function(e){
+      var er = e.getBoundingClientRect();
+      var card = e.closest('.ctl');
+      var name = card ? ((card.querySelector('.k')||{}).textContent||'?') : '?';
+      if (card){
+        var cr2 = card.getBoundingClientRect();
+        if (er.bottom > cr2.bottom + 1)
+          faults.push('scroller clipped by its card: '+name);
+      }
+      var max = e.scrollHeight - e.clientHeight;
+      if (max > 2){
+        e.scrollTop = 999999;
+        if (e.scrollTop < max - 1)
+          faults.push('scroller cannot reach its end: '+name+
+                      ' (stopped at '+Math.round(e.scrollTop)+' of '+Math.round(max)+')');
+        var kids = e.querySelectorAll('button');
+        var last = kids[kids.length-1];
+        if (last){
+          var lr2 = last.getBoundingClientRect(), er2 = e.getBoundingClientRect();
+          if (lr2.bottom > er2.bottom + 1)
+            faults.push('last item unreachable in scroller: '+name);
+        }
+        e.scrollTop = 0;
+      }
     });
-    if (nested) faults.push('nested scroller inside a card ('+nested+')');
     p.scrollTop = 999999;
     var last = kids[kids.length-1];
     if (last){
