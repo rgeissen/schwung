@@ -225,9 +225,9 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
  * min-content tracks are sized by their contents and never by the leftover
  * space, so a row always holds its card and the pane takes the overflow.
  */
-.pane{padding:8px 10px calc(8px + var(--safe-b));overflow-y:auto;flex:1;min-height:0;
+.pane{padding:6px 8px calc(6px + var(--safe-b));overflow-y:auto;flex:1;min-height:0;
   display:grid;grid-template-columns:repeat(6,1fr);grid-auto-rows:min-content;
-  align-content:start;gap:5px;-webkit-overflow-scrolling:touch}
+  align-content:start;gap:4px;-webkit-overflow-scrolling:touch}
 /* min-width:0 on the flex/grid child, or long values push the card wider
    than the rail and the pane scrolls sideways. */
 /* flex-shrink:0 is LOAD-BEARING. .pane is a flex column, so a card defaults
@@ -239,11 +239,11 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 /* align-self:start, or the grid stretches/squeezes a card away from its own
    content height and `overflow:hidden` quietly eats the difference. */
 .ctl{background:var(--raised);border:1px solid var(--line);border-radius:10px;
-  padding:5px 7px;min-width:0;grid-column:span 6;align-self:start;overflow:hidden}
+  padding:4px 6px;min-width:0;grid-column:span 6;align-self:start;overflow:hidden}
 .ctl.half{grid-column:span 3}
 .ctl.third{grid-column:span 2}
 .ctl > label{display:flex;justify-content:space-between;align-items:baseline;
-  gap:8px;margin-bottom:4px;min-width:0}
+  gap:8px;margin-bottom:2px;min-width:0}
 .ctl > label .v{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ctl > label .k{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .k{font:700 8px/1 ui-monospace,monospace;letter-spacing:.18em;color:var(--faint)}
@@ -251,7 +251,7 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 
 /* generic: only where the parameter has no shape worth drawing */
 .seg{display:flex;flex-wrap:wrap;gap:4px}
-.seg button{flex:1 1 auto;min-width:30px;min-height:27px;padding:0 6px;border-radius:7px;
+.seg button{flex:1 1 auto;min-width:28px;min-height:25px;padding:0 5px;border-radius:6px;
   border:1px solid var(--line);background:#0F151E;color:var(--dim);
   font:600 11px/1 -apple-system,system-ui,sans-serif;transition:background .1s,color .1s}
 .seg button[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);
@@ -274,17 +274,24 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
  * and pushes the rest of the bank off the screen, which is what makes you
  * scroll the whole pane to reach a control you could otherwise see.
  */
-.pick{max-height:168px;overflow-y:auto;border-radius:8px;background:#0C1119;
+.pick{max-height:150px;overflow-y:auto;border-radius:8px;background:#0C1119;
   padding:5px;border:1px solid #1B222C;-webkit-overflow-scrolling:touch;
   overscroll-behavior:contain}
-.slide{position:relative;height:27px;border-radius:8px;background:#0F151E;
+.slide{position:relative;height:24px;border-radius:8px;background:#0F151E;
   border:1px solid var(--line);overflow:hidden;touch-action:none}
 .slide i{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,#3A2E1C,var(--gold));opacity:.9}
 .slide u{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   font:700 12px/1 ui-monospace,monospace;text-decoration:none;text-shadow:0 1px 3px #000;z-index:2}
 .slide.bi::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;
   background:var(--faint);opacity:.7;z-index:1}
-.fire{width:100%;min-height:31px;border-radius:9px;border:1px solid var(--line);
+/* The action button IS a card, so it takes the card's frame and its own
+   padding rather than sitting inside one. */
+.act-btn{min-height:32px;display:flex;align-items:center;justify-content:center;
+  color:var(--ink);font:700 11px/1 ui-monospace,monospace;letter-spacing:.12em;
+  text-align:center}
+.act-btn:active{background:var(--gold);border-color:var(--gold);color:#0B0E13}
+.act-btn.warn:active{background:var(--warn);border-color:var(--warn);color:#0B0E13}
+.fire{width:100%;min-height:28px;border-radius:9px;border:1px solid var(--line);
   background:#0F151E;font:700 11px/1 ui-monospace,monospace;letter-spacing:.12em;margin-top:6px}
 .fire:first-of-type{margin-top:0}
 .fire:active{background:var(--gold);color:#0B0E13}
@@ -296,7 +303,7 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
    overscroll-behavior:contain stops a flick that reaches the end from being
    handed to the pane, which is what makes two nested scrollers feel like a
    fight over one gesture. */
-.rlist{display:flex;flex-direction:column;gap:3px;max-height:150px;overflow-y:auto;
+.rlist{display:flex;flex-direction:column;gap:2px;max-height:138px;overflow-y:auto;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .rrow{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;
   background:#0F151E;border:1px solid transparent;min-height:23px}
@@ -311,7 +318,7 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 .rrow[aria-pressed="true"] > span{color:var(--gold)}
 .rrow[aria-pressed="true"] rect{fill:var(--gold)}
 /* ROOT: a keyboard */
-.kbd{position:relative;height:clamp(44px,8vw,58px);display:flex;gap:2px}
+.kbd{position:relative;height:clamp(36px,6.5vw,46px);display:flex;gap:2px}
 .wk{flex:1;background:#E8EDF2;border-radius:0 0 5px 5px;position:relative}
 .wk::after{content:attr(data-n);position:absolute;bottom:5px;left:0;right:0;text-align:center;
   font:700 9px/1 ui-monospace,monospace;color:#5A6675}
@@ -321,8 +328,8 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 .bk{position:absolute;top:0;width:8.2%;height:60%;background:#141922;
   border:1px solid #000;border-radius:0 0 4px 4px;z-index:2}
 .bk[aria-pressed="true"]{background:var(--gold);border-color:var(--gold)}
-.octrow{display:flex;align-items:center;gap:3px;margin-top:4px}
-.octrow button{flex:1;min-height:34px;border-radius:7px;border:1px solid var(--line);
+.octrow{display:flex;align-items:center;gap:3px;margin-top:3px}
+.octrow button{flex:1;min-height:27px;border-radius:7px;border:1px solid var(--line);
   background:#0F151E;color:var(--dim);font:700 11px/1 ui-monospace,monospace}
 .octrow button[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:#0B0E13}
 /* DEGREE: the numeral and the chord it is */
@@ -333,8 +340,8 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
    and auto-fit still reflows rather than squashing on a narrower one -- which
    is the reason this was never a fixed column count. */
 .deg{display:grid;grid-template-columns:repeat(auto-fit,minmax(27px,1fr));gap:2px}
-.deg button{padding:4px 0;border-radius:7px;border:1px solid var(--line);background:#0F151E;
-  display:flex;flex-direction:column;align-items:center;gap:1px;min-height:42px;
+.deg button{padding:2px 0;border-radius:6px;border:1px solid var(--line);background:#0F151E;
+  display:flex;flex-direction:column;align-items:center;gap:0;min-height:34px;
   min-width:0;overflow:hidden}
 .deg b{font:700 13px/1.1 -apple-system,system-ui,sans-serif}
 .deg span{font:600 8px/1 ui-monospace,monospace;color:var(--faint);
@@ -344,7 +351,7 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 .deg button.off{opacity:.28;pointer-events:none}
 /* COLOUR: the spacing itself */
 .vgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(62px,1fr));gap:5px}
-.vgrid button{padding:4px 2px 3px;border-radius:8px;border:1px solid var(--line);
+.vgrid button{padding:3px 2px 2px;border-radius:8px;border:1px solid var(--line);
   background:#0F151E;display:flex;flex-direction:column;align-items:center;gap:4px}
 .vgrid svg{width:21px;height:24px}
 .vgrid circle{fill:var(--gold)}
@@ -354,10 +361,10 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 .vgrid button[aria-pressed="true"] span{color:var(--gold)}
 /* LENGTH: a width */
 .dur{display:grid;grid-template-columns:repeat(auto-fit,minmax(38px,1fr));gap:4px}
-.dur button{position:relative;height:35px;border-radius:8px;border:1px solid var(--line);
+.dur button{position:relative;height:30px;border-radius:8px;border:1px solid var(--line);
   background:#0F151E;overflow:hidden}
 .dur i{position:absolute;left:0;top:0;bottom:0;background:#2A3341}
-.dur span{position:relative;font:700 11px/35px ui-monospace,monospace;color:var(--dim)}
+.dur span{position:relative;font:700 11px/30px ui-monospace,monospace;color:var(--dim)}
 .dur button[aria-pressed="true"]{border-color:var(--gold)}
 .dur button[aria-pressed="true"] i{background:var(--gold);opacity:.85}
 .dur button[aria-pressed="true"] span{color:#0B0E13}
@@ -365,8 +372,13 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 /* STEPPER: a number you can land on. A 7-position inversion or a 5-position
    octave read as a drag target only because everything numeric defaulted to
    one; the value you want is a specific integer, so name it and step to it. */
-.step{display:flex;align-items:center;gap:5px}
-.step button{flex:0 0 36px;height:38px;border-radius:8px;border:1px solid var(--line);
+/* CENTRED AND CAPPED. In a full-width card a stretched stepper puts - and +
+   at opposite ends of the rail with the number marooned between them, which
+   reads as two unrelated controls. The row keeps its natural size and sits in
+   the middle whatever the card's width. */
+.step{display:flex;align-items:center;justify-content:center;gap:5px;
+  max-width:190px;margin:0 auto}
+.step button{flex:0 0 32px;height:32px;border-radius:8px;border:1px solid var(--line);
   background:#0F151E;color:var(--ink);font:700 17px/1 -apple-system,system-ui,sans-serif}
 /*
  * A THIRD-WIDTH CARD CANNOT AFFORD TWO 36px BUTTONS. Inversion, Length and
@@ -377,7 +389,7 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
  * roughly twice the room.
  */
 .ctl.third .step{gap:3px}
-.ctl.third .step button{flex:0 0 27px;height:34px;font-size:15px}
+.ctl.third .step button{flex:0 0 25px;height:29px;font-size:14px}
 .step button:active{background:var(--gold);color:#0B0E13}
 .step button[disabled]{opacity:.3}
 .step span{flex:1;min-width:0;text-align:center;color:var(--gold);
@@ -962,8 +974,12 @@ var SPAN = {
      a level, not one of that trio. Chord Oct stays full width rather than
      sitting half-empty beside a gap. */
   inv:2, len:2, off:2,
-  defoct:3, transpose:3,
-  vel:2, gate:2, strum:2
+  defoct:3, transpose:3, steps:3, bars:3,
+  vel:2, gate:2, strum:2,
+  /* CLIP: the two-option modes and the actions pair up, so the bank is read
+     as rows of related things rather than one column of full-width cards. */
+  read_mode:3, stamp_mode:3, lanes:3, run:3,
+  read:3, stamp:3, clear:3, duplicate:3, stretch:3, compress:3, undo:3
 };
 var BESPOKE = {
   root: kbdControl, key: kbdControl,
@@ -1329,14 +1345,22 @@ function sliderControl(k){
   d.appendChild(s);
   return d;
 }
+/*
+ * AN ACTION IS THE BUTTON. It used to be a card with a label above a button
+ * that said the same word -- "Clear" over CLEAR, "Stamp Clip" over STAMP CLIP
+ * -- which is the name twice and a card's worth of chrome to hold it. Six of
+ * those on CLIP was most of the bank's height spent saying nothing new.
+ *
+ * The button carries the card's own frame instead, so it reads as one control
+ * and the label is where it always was: on the thing you press.
+ */
 function actionControl(k){
-  var d = shell(name(k), null); d.className += " half";
   var b = document.createElement("button");
-  b.className = "fire" + (/clear|remove/.test(k) ? " warn" : "");
+  b.className = "ctl act-btn half" + (/clear|remove/.test(k) ? " warn" : "");
   b.textContent = (name(k) || k).toUpperCase();
+  b.setAttribute("aria-label", name(k) || k);
   b.onclick = function(){ set(k, "on"); };
-  d.appendChild(b);
-  return d;
+  return b;
 }
 
 /*

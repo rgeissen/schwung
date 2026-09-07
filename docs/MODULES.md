@@ -541,6 +541,23 @@ audits every bank at four viewport sizes for overlap, clipping, escape, a
 last-card that scrolling cannot reach, and nested scrollers. Each of those
 checks exists because that fault shipped.
 
+#### An action is the button, not a card containing its own name
+
+A write-trigger rendered as a labelled card holding a button says the name
+twice — "Clear" above `CLEAR`, "Stamp Clip" above `STAMP CLIP` — and spends a
+card's chrome doing it. Six of those was most of the CLIP bank's height saying
+nothing new. The button takes the card's frame instead, so it reads as one
+control and the label sits where it always was: on the thing you press. CLIP
+went from 617px to 270px, which is the difference between scrolling that bank
+and seeing it.
+
+Two more that only show on a narrow rail: a stretched stepper puts `−` and `+`
+at opposite ends with the number marooned between them, so cap and centre the
+row; and a control whose card is a third of the rail cannot afford full-size
+stepper buttons — measure the value's `scrollWidth` against its box, because
+the failure is a number clipped to a sliver rather than anything that looks
+broken.
+
 #### A long list scrolls inside its own cell
 
 Cap it and let it scroll in place, so every cell on the bank stays in view and
