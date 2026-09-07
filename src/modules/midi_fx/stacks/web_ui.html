@@ -146,6 +146,19 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 .act:active{background:var(--gold);border-color:var(--gold);color:#0B0E13}
 .act.warn:active{background:var(--warn);border-color:var(--warn);color:#0B0E13}
 .act[disabled]{opacity:.3}
+/*
+ * BYPASS, as a control you own rather than a thing to be talked through.
+ *
+ * Stacks reads an incoming note as a CHORD SELECTOR ("so it works the same
+ * from a Move pad, a clip and an external keyboard"), so once a recorded clip
+ * plays back on the track the slot listens to, the module re-triggers off its
+ * own recording. That is not a bug to fix in the module -- selecting chords
+ * from a clip is the feature -- it is a state you need to be able to leave.
+ *
+ * Lit when BYPASSED, because that is the abnormal state and the one worth
+ * seeing from across the room.
+ */
+.act[aria-pressed="true"]{background:var(--warn);border-color:var(--warn);color:#0B0E13}
 .chips{display:flex;gap:9px;margin-left:auto;align-items:center}
 .chip{padding:5px 10px;border-radius:8px;background:var(--raised);border:1px solid var(--line);
   display:flex;flex-direction:column;gap:3px;min-width:56px}
@@ -435,6 +448,12 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
         already carries the other half of the pair -- its "+" is how a chord is
         added -- so the counterpart reads without a legend.
       -->
+      <button id="actBypass" class="act" aria-pressed="false"
+              aria-label="Bypass Stacks"><svg viewBox="0 0 24 24" width="17" height="17"
+        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 4v8"/><path d="M6.8 7.2a8 8 0 1 0 10.4 0"/>
+      </svg></button>
       <span id="stat" class="stat" role="status" aria-live="polite" hidden></span>
       <button id="actDel" class="act warn" aria-label="Remove the selected chord"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M6 12h12"/>
@@ -1528,6 +1547,12 @@ function pollStatus(){
 /* Undo / redo / delete. Write triggers: the value is the word "on". */
 (function(){
   var fire = function(key){ return function(){ set(key, "on"); }; };
+  var byp = document.getElementById("actBypass");
+  byp.onclick = function(){
+    /* `bypassed` belongs to the CHAIN HOST, not to stacks -- it is read and
+       written on the component prefix but never reaches the plugin. */
+    set("bypassed", String(get("bypassed") === "1" ? 0 : 1));
+  };
   document.getElementById("actUndo").onclick = fire("undo");
   document.getElementById("actRedo").onclick = fire("redo");
   document.getElementById("actDel").onclick = function(){
@@ -1613,6 +1638,13 @@ function paintStatus(){
 }
 
 function paintTransport(){
+  var byp = document.getElementById("actBypass");
+  if (byp){
+    var on = get("bypassed") === "1";
+    byp.setAttribute("aria-pressed", String(on));
+    byp.setAttribute("aria-label", on ? "Stacks bypassed - tap to enable"
+                                      : "Bypass Stacks");
+  }
   /* Delete is refused at one chord by the module; say so rather than no-op. */
   var del = document.getElementById("actDel");
   if (del) del.disabled = !prog || prog.count <= 1;

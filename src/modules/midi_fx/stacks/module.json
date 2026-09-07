@@ -34,7 +34,8 @@
           "kind": "custom:stkstaff",
           "extra_keys": [
             "prog",
-            "status"
+            "status",
+            "bypassed"
           ]
         }
       },

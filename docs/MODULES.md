@@ -541,6 +541,31 @@ audits every bank at four viewport sizes for overlap, clipping, escape, a
 last-card that scrolling cannot reach, and nested scrollers. Each of those
 checks exists because that fault shipped.
 
+#### Bypass is the way out of a module that is doing its job
+
+Stacks reads an incoming note as a CHORD SELECTOR — "so it works the same from
+a Move pad, a clip and an external keyboard". Record its output into the Move
+track the slot listens to, and the clip then re-triggers the module on every
+playback. That is not a bug: selecting chords from a clip is the feature. It is
+a state the user has to be able to leave, so the panel carries a bypass toggle
+beside the transport, lit when bypassed because that is the abnormal state.
+
+Two properties it must have, both pinned by
+`tests/host/test_midi_fx_bypass_is_surgical.sh`:
+
+- **It must not silence the synth.** A bypassed MIDI FX stage is SKIPPED
+  (`if (!active(ctx, fx)) continue;`) so messages carry on to the next stage
+  and to the sound module. A `break` or a drop there would silence the whole
+  track, and would be read as "bypass deactivated my synth".
+- **It must not hit the neighbours.** `midi_fx_bypassed` is indexed from the
+  key, and the panel writes its OWN component, so a copy in `midi_fx2` bypasses
+  `midi_fx2`. That hole existed once: only `midi_fx1:bypassed` was enumerated,
+  and `midi_fx2:bypassed` was handed to the plugin as one of its own params, so
+  a second MIDI FX could not be bypassed at all.
+
+It is the same flag the device toggles with **Mute + Jog Click** on the focused
+module, so the two surfaces cannot disagree.
+
 #### A long action must report, and the report belongs to the ACTION
 
 Read Clip and Stamp Clip hand their work to a worker thread and return
