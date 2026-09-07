@@ -108,6 +108,22 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
   transition:background .12s,color .12s,border-color .12s}
 .xport:active{transform:scale(.94)}
 .xport[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:#0B0E13}
+/*
+ * Undo / Redo / Delete beside the transport. All three are WRITE triggers on
+ * the module (`undo`, `redo`, `remove`), so they carry no state to show --
+ * only whether pressing them is meaningful, which is why Delete dims at a
+ * progression of one: the module's floor is one chord, since every add gesture
+ * copies the chord you are on, and a button that silently does nothing is
+ * worse than a button that says it cannot.
+ */
+.acts{display:flex;gap:5px;margin-left:9px;align-items:center}
+.act{width:34px;height:34px;flex:0 0 auto;border-radius:9px;
+  background:var(--raised);border:1px solid var(--line);color:var(--dim);
+  display:flex;align-items:center;justify-content:center;font-size:15px;
+  transition:background .12s,color .12s,border-color .12s}
+.act:active{background:var(--gold);border-color:var(--gold);color:#0B0E13}
+.act.warn:active{background:var(--warn);border-color:var(--warn);color:#0B0E13}
+.act[disabled]{opacity:.3}
 .chips{display:flex;gap:9px;margin-left:auto;align-items:center}
 .chip{padding:5px 10px;border-radius:8px;background:var(--raised);border:1px solid var(--line);
   display:flex;flex-direction:column;gap:3px;min-width:56px}
@@ -356,6 +372,11 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
     <div class="brand">Stacks<small>CHORD PROGRESSIONS</small></div>
     <button id="xport" class="xport" aria-label="Play the progression"
             aria-pressed="false"><span id="xportGlyph">&#9654;</span></button>
+    <div class="acts">
+      <button id="actUndo" class="act" aria-label="Undo">&#8630;</button>
+      <button id="actRedo" class="act" aria-label="Redo">&#8631;</button>
+      <button id="actDel" class="act warn" aria-label="Delete the selected chord">&#9003;</button>
+    </div>
     <div class="chips">
       <span id="demoBadge" class="demo" hidden>DEMO</span>
       <div class="chip"><b id="sKey">A min</b><span>KEY</span></div>
@@ -1316,6 +1337,22 @@ cv.addEventListener("pointerdown", function(e){
     if (x >= hits[i].x && x <= hits[i].x + hits[i].w){ set("sel", hits[i].i+1); holdOn(); return; }
 });
 
+/* Undo / redo / delete. Write triggers: the value is the word "on". */
+(function(){
+  var fire = function(key){ return function(){ set(key, "on"); }; };
+  document.getElementById("actUndo").onclick = fire("undo");
+  document.getElementById("actRedo").onclick = fire("redo");
+  document.getElementById("actDel").onclick = function(){
+    /* The strip is the picture of what this deletes, so re-point the local
+       selection at what will take its place -- otherwise the highlight names
+       a chord that no longer exists until prog comes back. */
+    var n = prog ? prog.count : 0, cur = selIndex(prog);
+    if (n <= 1) return;
+    set("remove", "on");
+    vals.sel = String(cur > n - 1 ? n - 1 : cur);
+  };
+})();
+
 /* Play/stop the buffer. `preview` is an enum, so the value is a word. */
 (function(){
   var btn = document.getElementById("xport");
@@ -1325,6 +1362,9 @@ cv.addEventListener("pointerdown", function(e){
   };
 })();
 function paintTransport(){
+  /* Delete is refused at one chord by the module; say so rather than no-op. */
+  var del = document.getElementById("actDel");
+  if (del) del.disabled = !prog || prog.count <= 1;
   var on = String(get("preview")) === "loop";
   var btn = document.getElementById("xport");
   btn.setAttribute("aria-pressed", String(on));

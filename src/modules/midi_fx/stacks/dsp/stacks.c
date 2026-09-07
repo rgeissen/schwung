@@ -3094,7 +3094,24 @@ static void stk_set_param_inner(void *instance, const char *key, const char *val
     } else if (strcmp(key, "preview") == 0) {
         static const char *const P[] = { "off", "chord", "loop" };
         int i = opt_index(val, P, 3);
-        if (i >= 0) st->preview = i;
+        if (i >= 0) {
+            /*
+             * LEAVING `loop` MUST STOP LIKE A RELEASE DOES, not merely stop
+             * scheduling. Assigning st->preview alone left whatever was armed
+             * still armed and whatever was sounding still sounding, so the
+             * chord rang on past the moment you asked for silence -- and with
+             * Move's transport stopped there is no clock edge coming that
+             * would have ended it. Same three lines the `play` release uses,
+             * for the same reason it uses them: stop now, whatever was still
+             * scheduled.
+             */
+            if (st->preview == 2 && i != 2) {
+                st->armed_id = 0;
+                st->pend_n = 0;
+                st->cut_pending = 1;
+            }
+            st->preview = i;
+        }
     } else if (strcmp(key, "octave") == 0) {
         st->octave = clampi(atoi(val), -2, 2);
     } else if (strcmp(key, "velocity") == 0) {
