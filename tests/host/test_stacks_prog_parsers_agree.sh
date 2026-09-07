@@ -47,8 +47,9 @@ const htmlSrc = fs.readFileSync(htmlPath, "utf8");
 const deviceParse = new Function("return (" + extract(canvasSrc, "parseProg") + ")")();
 const panelParse = new Function("return (" + extract(htmlSrc, "parseProg") + ")")();
 
-const HEAD = "v12|COUNT|1|-1|8|5ad|9|32|0|4|120|0|0|";
-const prog = (chords) => HEAD.replace("COUNT", String(chords.length)) + chords.join(";");
+const head = (v, n) => v + "|" + n + "|1|-1|8|5ad|9|32|0|4|120|0|0|";
+const prog = (chords, v) => head(v || "v13", chords.length) + chords.join(";");
+const v12 = (chords) => prog(chords, "v12");
 
 const cases = [
   ["a lone rest (the phantom-note case)", prog(["REST,A3,0,8,0,100,0,1,"])],
@@ -63,6 +64,17 @@ const cases = [
   ["empty string",                        ""],
   ["wrong version",                       "v11|1|1|-1|8|5ad|9|32|0|4|120|0|0|Am,A3,0,8,0,100,0,1,57"],
   ["truncated header",                    "v12|1|1|"],
+
+  /* v13 carries a velocity per note; v12 carried none. Both must parse, and
+     both parsers must agree on which is which -- a DSP that has not been
+     reloaded still publishes v12, so the two coexist on a real device. */
+  ["v13 per-note velocities",             prog(["Am,A3,0,8,0,100,0,1,57:110.60:96.64:121"])],
+  ["v13 one note",                        prog(["A,A3,0,8,0,100,0,1,57:64"])],
+  ["v13 rest (no notes)",                 prog(["REST,A3,0,8,0,100,0,1,"])],
+  ["v13 velocity out of range dropped",   prog(["Am,A3,0,8,0,100,0,1,57:0.60:200.64:99"])],
+  ["v13 note without a velocity",         prog(["Am,A3,0,8,0,100,0,1,57.60:96"])],
+  ["v12 still parses (stale DSP)",        v12(["Am,A3,0,8,0,100,0,1,57.60.64"])],
+  ["v11 refused by both",                 "v11|1|1|-1|8|5ad|9|32|0|4|120|0|0|Am,A3,0,8,0,100,0,1,57"],
 ];
 
 /* Compare only what both sides claim to answer: the per-chord facts the
@@ -73,6 +85,7 @@ const project = (p) => p === null ? null : {
   chords: p.chords.map((c) => ({
     name: c.name, inv: c.inv, len: c.len, off: c.off, vel: c.vel,
     mute: c.mute, mask: c.mask, rest: c.rest, notes: c.notes,
+    noteVel: c.noteVel === undefined ? null : c.noteVel,
   })),
 };
 
@@ -100,7 +113,27 @@ for (const [who, fn] of [["canvas.js", deviceParse], ["web_ui.html", panelParse]
   }
 }
 
+/* The v13 velocities must actually arrive, or "they agree" would be satisfied
+   by both parsers dropping them. */
+for (const [who, fn] of [["canvas.js", deviceParse], ["web_ui.html", panelParse]]) {
+  const p = fn(prog(["Am,A3,0,8,0,100,0,1,57:110.60:96.64:121"]));
+  const got = p && p.chords[0].noteVel;
+  if (JSON.stringify(got) !== JSON.stringify([110, 96, 121])) {
+    bad++;
+    console.error("FAIL: " + who + " lost the v13 per-note velocities: " +
+                  JSON.stringify(got) + " (want [110,96,121])");
+  }
+  const legacy = fn(v12(["Am,A3,0,8,0,100,0,1,57.60.64"]));
+  const lv = legacy && legacy.chords[0].noteVel;
+  if (JSON.stringify(lv) !== JSON.stringify([null, null, null])) {
+    bad++;
+    console.error("FAIL: " + who + " invented velocities for a v12 publish: " +
+                  JSON.stringify(lv) + " (want three nulls)");
+  }
+}
+
 if (bad) { console.error(bad + " disagreement(s)"); process.exit(1); }
 console.log("PASS: both parseProg implementations agree on " + cases.length +
-            " prog strings, and an empty note field is no notes in each");
+            " prog strings (v12 and v13), an empty note field is no notes in " +
+            "each, and per-note velocities survive both parsers");
 NODE

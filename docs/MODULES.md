@@ -552,6 +552,29 @@ overscroll, which rubber-bands back on release. Let the list lay out in full
 and give the pane the overflow; also `align-self:start`, or the grid sizes a
 card away from its own content.
 
+#### One question, one function: how loud is this note
+
+`humanised_velocity()` answers a DEVIATION around the global velocity and knows
+nothing about a chord's own Chord Vel offset. Playback folded that back in by
+hand; the STAMP did not, and wrote the deviation straight into the clip. A
+chord at Chord Vel -63 therefore played quiet and stamped at full level --
+contradicting the one thing Stamp promises, that the clip is the take Preview
+played, and invisible until the clip is heard later without the module.
+`note_velocity()` is now the only caller, used by playback, the stamp and the
+wire; `tests/host/test_stacks_note_velocity_single_source.sh` fails when a
+second caller appears, which is the shape the bug had.
+
+#### v13: a velocity per note, because humanise is per note
+
+The wire carried one velocity per chord, so a per-note deviation was
+unrepresentable: pressing Randomize genuinely changed the take and nothing
+moved on either screen, which reads as a dead button. v13 writes
+`note:velocity`; v12 wrote `note`. Both parsers accept BOTH, deliberately -- a
+DSP that has not been reloaded still publishes v12, and copying a module's
+files does not reload it, so the two versions coexist on a device in the
+ordinary course of an update. An absent velocity falls back to the chord's,
+which is exactly what v12 meant.
+
 #### Two parsers for one wire format will disagree
 
 `canvas_script` is a single standalone script in QuickJS and the panel is an

@@ -1516,6 +1516,24 @@ static int humanised_velocity(const stk_t *st, int chord, int voice) {
     return clampi(v, 1, 127);
 }
 
+/*
+ * HOW LOUD ONE NOTE IS, in one place.
+ *
+ * humanised_velocity() answers a DEVIATION around the global velocity; it does
+ * not know about the chord's own offset. Playback added that back
+ * (`base_vel + (humanised - velocity)`) and the STAMP did not -- it wrote
+ * humanised_velocity() straight out, so a chord set to Chord Vel -63 played
+ * quiet and stamped at full level. That contradicts the one thing Stamp
+ * promises, that the clip is the take Preview played, and it is invisible
+ * until the clip is heard later without the module.
+ *
+ * Both callers ask here now, and the wire does too, so the three cannot drift.
+ */
+static int note_velocity(const stk_t *st, const stk_chord_t *c, int chord, int voice) {
+    int base = clampi(st->velocity + c->vel, 1, 127);
+    return clampi(base + (humanised_velocity(st, chord, voice) - st->velocity), 1, 127);
+}
+
 /* Deviation in CLOCKS, both directions. The caller clamps the resulting onset
  * so a chord can never be dragged in front of its own step. */
 static int humanised_delay(const stk_t *st, int chord, int voice, int eighth) {
@@ -1841,7 +1859,7 @@ static int stamp_to_file(const stk_t *st) {
                 "              \"offVelocity\": 0.0\n"
                 "            }",
                 wrote ? "," : "", tones[i], start + shift, dur,
-                (double)humanised_velocity(st, k, i));
+                (double)note_velocity(st, &st->prog.ch[k], k, i));
             wrote++;
         }
     }
@@ -2049,9 +2067,7 @@ static void arm_chord(stk_t *st, int step, int hold) {
         for (int i = 0; i < cnt && st->pend_n < STK_MAX_PEND; i++) {
             st->pend[st->pend_n].note  = tones[i];
             st->pend[st->pend_n].vel   = hold ? base_vel
-                                              : clampi(base_vel
-                                                  + (humanised_velocity(st, step, i)
-                                                     - st->velocity), 1, 127);
+                                              : note_velocity(st, c, step, i);
             st->pend[st->pend_n].at    = at + swing_at + delay[i] - lo;
             st->pend[st->pend_n].dur   = hold ? STK_HOLD_FOREVER : sound;
             st->pend[st->pend_n].fired = 0;
@@ -3628,7 +3644,19 @@ static int fmt_prog(const stk_t *st, char *buf, int buf_len) {
      * why -- which reads as the module having drifted rather than as a setting
      * doing its job.
      */
-    int at = snprintf(buf, buf_len, "v12|%d|%d|%d|%d|%03x|%d|%d|%d|%d|%d|%d|%d|",
+    /*
+     * v13 adds a VELOCITY TO EVERY NOTE -- "60:110", where v12 sent "60".
+     *
+     * Humanise is a per-NOTE deviation, so with one velocity per chord it was
+     * unrepresentable: pressing Randomize genuinely changed the take and
+     * nothing on either screen moved, which reads as a dead button. The
+     * drawers size a notehead by velocity, so publishing it per note is what
+     * makes the feel visible at all.
+     *
+     * It comes from note_velocity(), the same function playback and the stamp
+     * use, so the picture cannot show a velocity the synth did not play.
+     */
+    int at = snprintf(buf, buf_len, "v13|%d|%d|%d|%d|%03x|%d|%d|%d|%d|%d|%d|%d|",
                       st->prog.count, st->sel, st->cur_step,
                       step_eighths, lane_mask, lane_key, clip_eighths,
                       ((st->clock_running && st->run) || st->hold_run
@@ -3693,7 +3721,8 @@ static int fmt_prog(const stk_t *st, char *buf, int buf_len) {
         pv_n = n > STK_MAX_TONES ? STK_MAX_TONES : n;
         for (int q = 0; q < pv_n; q++) pv_prev[q] = tones[q];
         for (int i = 0; i < n && at < buf_len - 1; i++)
-            at += snprintf(buf + at, buf_len - at, "%s%d", i ? "." : "", tones[i]);
+            at += snprintf(buf + at, buf_len - at, "%s%d:%d", i ? "." : "",
+                           tones[i], note_velocity(st, c, k, i));
     }
     return at;
 }

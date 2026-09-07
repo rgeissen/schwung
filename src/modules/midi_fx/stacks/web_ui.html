@@ -541,7 +541,7 @@ var DEMO_PROG = "v12|4|4|2|8|ab5|9|64|1|4|96|38|0|" + [
 function parseProg(s){
   if (typeof s !== "string" || !s) return null;
   var h = s.split("|");
-  if (h.length < 14 || h[0] !== "v12") return null;
+  if (h.length < 14 || (h[0] !== "v13" && h[0] !== "v12")) return null;
   var p = { sel:+h[2]||1, playing:+h[3], stepUnits:+h[4]||8, mask:parseInt(h[5],16)||0,
             key:+h[6]||0, clipUnits:+h[7]||32, running:h[8]==="1", stepBeats:+h[9]||4,
             bpm:+h[10]||120, posUnits:+h[11]||0, grouping:+h[12]||0, chords:[] };
@@ -559,13 +559,21 @@ function parseProg(s){
      * Guard the empty string, and reject NaN explicitly rather than leaning
      * on a range test to do it.
      */
-    var rawNotes = f[8] || "";
-    var notes = rawNotes === "" ? [] :
-      rawNotes.split(".").map(Number).filter(function(n){
-        return isFinite(n) && n >= 0 && n <= 127; });
+    /* v13 writes "note:velocity", v12 wrote "note"; both are accepted, because
+       a DSP that has not been reloaded still emits v12. An absent velocity
+       falls back to the chord's, which is what v12 meant. */
+    var rawNotes = f[8] || "", notes = [], noteVel = [];
+    if (rawNotes !== "") rawNotes.split(".").forEach(function(t){
+      if (!t) return;
+      var bits = t.split(":"), nn = parseInt(bits[0], 10);
+      if (!isFinite(nn) || nn < 0 || nn > 127) return;
+      var vv = bits.length > 1 ? parseInt(bits[1], 10) : NaN;
+      notes.push(nn);
+      noteVel.push(isFinite(vv) && vv >= 1 && vv <= 127 ? vv : null);
+    });
     p.chords.push({ name:f[0]||"", root:f[1]||"", inv:+f[2]||0, len:+f[3]||1, off:+f[4]||0,
                     vel:+f[5]||100, mute:f[6]==="1", mask:parseInt(f[7],16)||1,
-                    rest:notes.length===0, notes:notes });
+                    rest:notes.length===0, notes:notes, noteVel:noteVel });
   });
   p.count = p.chords.length;
   return p;
@@ -695,8 +703,12 @@ function drawRoll(p, now){
       g.addColorStop(0, "rgba("+tint+",.13)"); g.addColorStop(1, "rgba("+tint+",.02)");
       cx.fillStyle = g; cx.fillRect(x0, TOP, w, BOT-TOP);
       var segs = hitSegs(c, w, p.stepUnits);
-      c.notes.forEach(function(nn){
-        var y = yOf(nn), hgt = 5 + (c.vel/127)*5;
+      c.notes.forEach(function(nn, ni){
+        /* Per-note velocity is what makes humanise visible: with one figure per
+           chord every notehead was the same height and Randomize moved nothing
+           on screen. Falls back to the chord's on a v12 publish. */
+        var nv = (c.noteVel && c.noteVel[ni] != null) ? c.noteVel[ni] : c.vel;
+        var y = yOf(nn), hgt = 5 + (nv/127)*5;
         cx.fillStyle = play ? "#4FD1E0" : "#F2A33C";
         segs.forEach(function(sg){
           var sw = Math.max(1.5, sg.w - 1.5);

@@ -97,7 +97,7 @@ function degreesFor(mask, key) {
 function parseProg(s) {
     if (typeof s !== "string" || s.length === 0) return null;
     const head = s.split("|");
-    if (head.length < 14 || head[0] !== "v12") return null;
+    if (head.length < 14 || !(head[0] === "v13" || head[0] === "v12")) return null;
     const sel = parseInt(head[2], 10);
     const playing = parseInt(head[3], 10);
     const mask = parseInt(head[5], 16);
@@ -116,8 +116,23 @@ function parseProg(s) {
         if (!part) continue;
         const f = part.split(",");
         if (f.length < 9) continue;
-        const notes = f[8].split(".").map((t) => parseInt(t, 10))
-                          .filter((v) => Number.isFinite(v) && v >= 0 && v <= 127);
+        /*
+         * v13 writes "note:velocity"; v12 wrote "note". BOTH are accepted --
+         * a DSP that has not been reloaded still emits v12, and copying a
+         * module's files does not reload it, so the two coexist on a device in
+         * the ordinary course of an update. An absent velocity falls back to
+         * the chord's, which is exactly what v12 meant.
+         */
+        const notes = [], noteVel = [];
+        for (const t of f[8].split(".")) {
+            if (!t) continue;
+            const bits = t.split(":");
+            const nn = parseInt(bits[0], 10);
+            if (!Number.isFinite(nn) || nn < 0 || nn > 127) continue;
+            const vv = bits.length > 1 ? parseInt(bits[1], 10) : NaN;
+            notes.push(nn);
+            noteVel.push(Number.isFinite(vv) && vv >= 1 && vv <= 127 ? vv : null);
+        }
         /*
          * Every field defaulted, NEVER left undefined. `i${undefined}` prints
          * the literal "iundefined" -- eleven characters that ran straight
@@ -140,6 +155,7 @@ function parseProg(s) {
              * nothing has been placed. */
             rest: notes.length === 0,
             notes,
+            noteVel,
         });
     }
     if (chords.length === 0) return null;
