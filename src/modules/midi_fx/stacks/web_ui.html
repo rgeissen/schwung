@@ -49,6 +49,11 @@
   --tap:52px;
   --safe-l:env(safe-area-inset-left,0px); --safe-r:env(safe-area-inset-right,0px);
   --safe-b:env(safe-area-inset-bottom,0px);
+  /* THE KEYBOARD GUTTER'S WIDTH, and the strip's left inset is derived from
+     it below. The roll takes its left edge from the strip's content box, so
+     declaring the gutter once here keeps the notes, the bars and the chord
+     cards on one x-origin -- widen the gutter and all three move together. */
+  --gutter:clamp(30px,3.6vw,44px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 /* THE UA'S [hidden] RULE LOSES TO A CLASS. `.hint{display:flex}` is one
@@ -181,7 +186,9 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 /* Same left/right inset as the roll's PAD, so bar 1 starts at the same x in
    both. gap:0 with the spacing carried as each card's own margin, or a card
    could not be proportional to its length and line up at the same time. */
-.strip{display:flex;gap:0;padding:11px 14px calc(11px + var(--safe-b));overflow-x:auto;
+.strip{display:flex;gap:0;
+  padding:11px 14px calc(11px + var(--safe-b)) calc(14px + var(--gutter));
+  overflow-x:auto;
   flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);
   scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .strip::-webkit-scrollbar{display:none}
@@ -726,13 +733,15 @@ function drawRoll(p, now){
    * starts at the strip's content box and ends where the add button begins.
    * Nothing to keep in sync, and it follows a re-layout for free.
    */
-  var TOP = 10, BOT = H - 18, PAD = 14, PAD_R = 14;
+  var TOP = 10, BOT = H - 18, PAD = 14, PAD_R = 14, GUTTER = 0;
   var stripEl = document.getElementById("strip");
   if (stripEl){
     var sr = stripEl.getBoundingClientRect(), cr = cv.getBoundingClientRect();
     var cs = getComputedStyle(stripEl);
     var addEl = stripEl.querySelector(".card.add");
-    var runL = sr.left + parseFloat(cs.paddingLeft || 0) - cr.left;
+    var padL = parseFloat(cs.paddingLeft || 0), padR = parseFloat(cs.paddingRight || 0);
+    GUTTER = Math.max(0, padL - padR);   /* the extra left inset IS the gutter */
+    var runL = sr.left + padL - cr.left;
     var runR = (addEl ? addEl.getBoundingClientRect().left
                       : sr.right - parseFloat(cs.paddingRight || 0)) - cr.left;
     if (isFinite(runL) && isFinite(runR) && runR - runL > 40){
@@ -747,6 +756,49 @@ function drawRoll(p, now){
   var span = Math.max(12, hi - lo);
   var yOf = function(n){ return BOT - ((n-lo)/span) * (BOT-TOP); };
   var xOf = function(u){ return PAD + (u/Math.max(1,p.clipUnits)) * (W - PAD - PAD_R); };
+
+  /*
+   * THE KEYBOARD, in the inset the strip's padding already reserves. Drawn
+   * before the lanes so a lane line stops at its edge rather than running
+   * across the keys.
+   *
+   * What it lights is the chord you are LOOKING at, or the one sounding if the
+   * transport is running -- and in that chord's own colour, so the keyboard and
+   * the notes beside it never disagree.
+   */
+  if (GUTTER > 8 && PAD - GUTTER >= 0){
+    var laneH = (BOT - TOP) / span;
+    /*
+     * THE KEYS LIGHT WITH THE MUSIC, not with the publish.
+     *
+     * `playing` is the module's step and only reaches us when prog is
+     * re-fetched, which is far slower than a bar -- keys lit from it would
+     * stutter a beat behind. The playhead is already animated locally from
+     * (bpm, posUnits) for the same reason, so the chord under it is the one
+     * to light. Stopped, it lights the chord you are LOOKING at instead, so
+     * the keyboard always says something true about the current chord.
+     */
+    var head = playhead(p, now), litIdx = -1;
+    if (head !== null){
+      var at = 0;
+      for (var ci = 0; ci < p.count; ci++){
+        var cl = Math.max(1, p.chords[ci].len);
+        if (head >= at && head < at + cl){ litIdx = ci; break; }
+        at += cl;
+      }
+    }
+    var live = litIdx >= 0;
+    if (!live) litIdx = selIndex(p) - 1;
+    var litChord = p.chords[litIdx], lit = {};
+    if (litChord && !litChord.rest)
+      litChord.notes.forEach(function(nn){ lit[nn] = 1; });
+    /* Borrow the roll's OWN vocabulary rather than inventing one: cyan is the
+       chord being played (drawRoll tints it so), violet is the chord being
+       edited (drawRoll outlines it so). A third colour here would mean the
+       keyboard and the notes beside it disagreed about the same chord. */
+    drawKeys(cx, PAD - GUTTER, PAD, lo, hi, yOf, laneH, p.key, lit,
+             live ? "#4FD1E0" : "#8B7BE8");
+  }
 
   /* lanes: the SCALE, not the chromatic — the other eight are notes the
      module snaps away from, so drawing them would be drawing nothing. */
@@ -878,6 +930,94 @@ function playhead(p, now){
   var upBeat = (p.stepUnits||8)/(p.stepBeats||4);
   var u = aU + ((now - aMs)/1000) * (p.bpm/60) * upBeat, c = Math.max(1, p.clipUnits);
   return ((u % c) + c) % c;
+}
+
+/*
+ * THE KEYBOARD GUTTER.
+ *
+ * Without it a row is an anonymous horizontal band: the roll draws lanes only
+ * for notes IN the scale, so even counting rows does not tell you a pitch, and
+ * an accidental has no lane at all. The keyboard names every semitone.
+ *
+ * Semitone-linear, one row per key, which is what the roll's own yOf() does --
+ * a literal piano geometry (white keys spanning a key and a half) would look
+ * more like a piano and stop lining up with the notes beside it, and lining up
+ * is the entire job. Live and Logic make the same trade.
+ *
+ * Black keys are drawn AFTER all the whites and inset from the right, so they
+ * read as sitting on top rather than as a darker row of the same thing.
+ */
+var KEY_BLACK = { 1:1, 3:1, 6:1, 8:1, 10:1 };
+function shade(hex, f){
+  var n = parseInt(hex.slice(1), 16);
+  return "rgb(" + Math.round((n >> 16 & 255) * f) + "," +
+                  Math.round((n >> 8 & 255) * f) + "," +
+                  Math.round((n & 255) * f) + ")";
+}
+function drawKeys(cx, x0, x1, lo, hi, yOf, laneH, key, lit, tint){
+  var w = x1 - x0;
+  if (w < 8 || laneH <= 0) return;
+  var kh = Math.max(1, laneH - 1);
+
+  /* The bed, so a gap between keys reads as a seam and not as the grid. */
+  cx.fillStyle = "#0A0E14";
+  cx.fillRect(x0, yOf(hi) - laneH / 2, w, (hi - lo + 1) * laneH);
+
+  for (var pass = 0; pass < 2; pass++){
+    for (var n = lo; n <= hi; n++){
+      var black = !!KEY_BLACK[((n % 12) + 12) % 12];
+      if ((pass === 0) === black) continue;          /* whites, then blacks */
+      var y = yOf(n) - laneH / 2;
+      var kw = black ? w * 0.62 : w;
+      var on = lit && lit[n];
+      var tonic = (((n - key) % 12) + 12) % 12 === 0;
+
+      if (on){
+        /* The SAME colour as the thing it reports -- cyan for the selected
+           chord, gold for one merely sounding. Two colours for one fact is
+           how a picture starts needing a legend. */
+        cx.fillStyle = black ? shade(tint, .62) : tint;
+      } else if (black){
+        cx.fillStyle = "#0E131B";
+      } else {
+        /* A touch of vertical shading, so a column of keys is not a flat slab. */
+        var g = cx.createLinearGradient(0, y, 0, y + kh);
+        g.addColorStop(0, tonic ? "#DCD8F4" : "#E9EEF3");
+        g.addColorStop(1, tonic ? "#C9C3EA" : "#CBD3DC");
+        cx.fillStyle = g;
+      }
+      if (cx.roundRect){
+        cx.beginPath();
+        cx.roundRect(x0, y + .5, kw, kh, [0,2,2,0]);
+        cx.fill();
+      } else {
+        cx.fillRect(x0, y + .5, kw, kh);
+      }
+      /* A lit top edge, so a black key sits ON the whites rather than reading
+         as a hole punched between them. */
+      if (black && !on){
+        cx.strokeStyle = "rgba(255,255,255,.07)"; cx.lineWidth = 1;
+        cx.beginPath(); cx.moveTo(x0, y + 1); cx.lineTo(x0 + kw, y + 1); cx.stroke();
+      }
+
+      /* Name every C, and the tonic, while there is room to read it. */
+      if (!black && laneH >= 8){
+        var pc = ((n % 12) + 12) % 12;
+        if (pc === 0 || tonic){
+          cx.fillStyle = on ? "#0B0E13" : (tonic ? "#4A3F8C" : "#7C8896");
+          cx.font = "700 " + Math.min(9, Math.max(7, laneH - 3)) +
+                    "px ui-monospace,SF Mono,monospace";
+          cx.textAlign = "right";
+          cx.fillText(NOTE[pc] + (Math.floor(n / 12) - 1), x1 - 3, y + kh - 2);
+          cx.textAlign = "left";
+        }
+      }
+    }
+  }
+  /* One crisp edge where the keyboard stops and the grid begins. */
+  cx.strokeStyle = "rgba(0,0,0,.55)"; cx.lineWidth = 1;
+  cx.beginPath(); cx.moveTo(x1 - .5, yOf(hi) - laneH / 2);
+  cx.lineTo(x1 - .5, yOf(lo) + laneH / 2); cx.stroke();
 }
 
 /* ═══════════════════════════════ strip ════════════════════════ */

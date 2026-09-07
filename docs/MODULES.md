@@ -583,6 +583,34 @@ no change. The window opens when the user presses something and closes a few
 seconds after the module answers, with a timeout so a module that never
 answers doesn't pin `WORKING` on screen forever.
 
+#### The keyboard gutter, and the two traps in it
+
+A pitch row is an anonymous band without one — worse here than in a DAW,
+because the roll draws lanes only for notes IN the scale, so an accidental has
+no lane to count from. The gutter names every semitone.
+
+Semitone-linear, one row per key, matching the roll's own `yOf()`. A literal
+piano geometry (white keys spanning a key and a half) looks more like a piano
+and stops lining up with the notes beside it — and lining up is the whole job.
+Blacks are drawn after all the whites, inset, with a hairline top edge so they
+read as sitting on top rather than as a darker row of the same thing.
+
+**A custom property is not a length.** `getPropertyValue("--gutter")` returns
+the literal `clamp(30px,3.6vw,44px)`, and `parseFloat` of that is `NaN` — so
+the gutter measured 0 and the whole keyboard silently never drew, with no error
+anywhere. Derive it from resolved computed values instead: the gutter is
+exactly how much the strip's left padding exceeds its right.
+
+**Light the keys from the LOCAL playhead, not from `playing`.** The module's
+step only arrives when `prog` is re-fetched, which is far slower than a bar, so
+keys lit from it stutter behind the music. The playhead is already animated
+locally from `(bpm, posUnits)` for that reason; the chord under it is the one to
+light. Stopped, light the chord being edited instead.
+
+And take the colours from the roll's existing vocabulary — cyan for playing,
+violet for selected — or the keyboard and the notes beside it will disagree
+about the same chord.
+
 #### A stamp writes the clip's LENGTH as well as its notes
 
 The splice replaced `notes` and nothing else, so the clip kept whatever length
