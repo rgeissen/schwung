@@ -558,6 +558,25 @@ no change. The window opens when the user presses something and closes a few
 seconds after the module answers, with a timeout so a module that never
 answers doesn't pin `WORKING` on screen forever.
 
+#### A stamp writes the clip's LENGTH as well as its notes
+
+The splice replaced `notes` and nothing else, so the clip kept whatever length
+it already had — a fresh one is a single bar — and a four-bar progression was
+written three bars past the loop end. Every note was in the file and the clip
+played one bar of them, which reads as "the stamp lost my music". `region.end`
+and `region.loop.end` are rewritten in place as two more number-sized splices,
+never by re-emitting the region object: same rule as the notes array, since a
+set carries a great deal this module does not understand. A clip with no
+`region` (an older schema) is left alone and still gets its notes.
+
+#### `write file` races Move, and Move wins
+
+Move holds the set in memory and autosaves over it, so a spliced `Song.abl` can
+be silently replaced — observed: 14 notes written at 11:58, the file rewritten
+by Move at 12:09 with the notes gone. That is why `stamp_mode` defaults to
+**rec arm**. `write file` is opt-in and only safe when Move will not write that
+set before you reload it.
+
 #### Stamp means two different things, and the button must say which
 
 `stamp_mode` defaults to **rec arm**, which writes no file: it restarts the

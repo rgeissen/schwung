@@ -1865,15 +1865,70 @@ static int stamp_to_file(const stk_t *st) {
     }
     at += (size_t)snprintf(arr + at, cap - at, "%s]", wrote ? "\n          " : "");
 
+    /*
+     * THE CLIP'S LENGTH IS PART OF THE STAMP.
+     *
+     * Only `notes` was spliced, so the clip kept whatever length it already
+     * had -- a fresh one is a single bar -- and a four-bar progression was
+     * written three bars past the loop end. The notes were all there and the
+     * clip played one bar of them, which reads as "the stamp lost my music".
+     *
+     * `region.end` and `region.loop.end` are REWRITTEN IN PLACE, as two more
+     * number-sized splices, rather than by re-emitting the region object. Same
+     * rule as the notes array: a set carries a great deal this module does not
+     * understand, and re-serialising is how that gets lost. Anything missing
+     * (an older schema, a clip without a loop) is simply left alone -- the
+     * stamp still writes its notes.
+     */
+    const char *r_end = NULL, *r_end_stop = NULL;
+    const char *l_end = NULL, *l_end_stop = NULL;
+    const char *region = js_member(clip, "region");
+    if (region && *js_ws(region) == '{') {
+        const char *re_ = js_member(region, "end");
+        if (re_) { r_end = js_ws(re_); r_end_stop = js_skip_value(re_); }
+        const char *loop = js_member(region, "loop");
+        if (loop && *js_ws(loop) == '{') {
+            const char *le = js_member(loop, "end");
+            if (le) { l_end = js_ws(le); l_end_stop = js_skip_value(le); }
+        }
+    }
+    char endbuf[64];
+    int endlen = snprintf(endbuf, sizeof(endbuf), "%.6f", clip_beats);
+
+    /* The three edits in file order, so one pass can write them. */
+    struct { const char *at, *stop; const char *rep; int rep_len; } ed[3];
+    int n_ed = 0;
+    ed[n_ed].at = notes; ed[n_ed].stop = notes_end;
+    ed[n_ed].rep = arr; ed[n_ed].rep_len = (int)at; n_ed++;
+    if (r_end && r_end_stop > r_end) {
+        ed[n_ed].at = r_end; ed[n_ed].stop = r_end_stop;
+        ed[n_ed].rep = endbuf; ed[n_ed].rep_len = endlen; n_ed++;
+    }
+    if (l_end && l_end_stop > l_end) {
+        ed[n_ed].at = l_end; ed[n_ed].stop = l_end_stop;
+        ed[n_ed].rep = endbuf; ed[n_ed].rep_len = endlen; n_ed++;
+    }
+    for (int a = 0; a < n_ed; a++)
+        for (int b = a + 1; b < n_ed; b++)
+            if (ed[b].at < ed[a].at) { __typeof__(ed[0]) t = ed[a]; ed[a] = ed[b]; ed[b] = t; }
+
     char tmp[1100];
     snprintf(tmp, sizeof(tmp), "%s.stacks.tmp", path);
     FILE *f = fopen(tmp, "wb");
     if (!f) { free(arr); goto done; }
-    size_t head = (size_t)(notes - json);
-    size_t tail = (size_t)(len - (notes_end - json));
-    int wrote_ok = (fwrite(json, 1, head, f) == head)
-                && (fwrite(arr, 1, at, f) == at)
-                && (fwrite(notes_end, 1, tail, f) == tail);
+    int wrote_ok = 1;
+    const char *cur = json;
+    for (int e = 0; e < n_ed && wrote_ok; e++) {
+        size_t gap = (size_t)(ed[e].at - cur);
+        if (fwrite(cur, 1, gap, f) != gap) wrote_ok = 0;
+        else if (fwrite(ed[e].rep, 1, (size_t)ed[e].rep_len, f) != (size_t)ed[e].rep_len)
+            wrote_ok = 0;
+        cur = ed[e].stop;
+    }
+    if (wrote_ok) {
+        size_t tail = (size_t)(len - (cur - json));
+        if (fwrite(cur, 1, tail, f) != tail) wrote_ok = 0;
+    }
     if (fflush(f) != 0) wrote_ok = 0;
     fclose(f);
     free(arr);
