@@ -102,9 +102,14 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
  * also runs from Move's clock and from a held chord. A button that claimed to
  * be the whole truth would show Stop for a state it cannot stop.
  */
+/* Play, undo, redo and delete are ONE group, so they are one size and one
+   stroke weight. Text glyphs could not give that: a hairline U+21B6 beside a
+   solid U+25B6 reads as two different sets of controls that happen to sit
+   together. Drawn instead, at 2px in currentColor, so the row is coherent and
+   the colour still comes from the button state. */
 .xport{margin-left:14px;width:38px;height:38px;flex:0 0 auto;border-radius:10px;
   background:var(--raised);border:1px solid var(--line);color:var(--ink);
-  display:flex;align-items:center;justify-content:center;font-size:13px;
+  display:flex;align-items:center;justify-content:center;
   transition:background .12s,color .12s,border-color .12s}
 .xport:active{transform:scale(.94)}
 .xport[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:#0B0E13}
@@ -116,11 +121,12 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
  * copies the chord you are on, and a button that silently does nothing is
  * worse than a button that says it cannot.
  */
-.acts{display:flex;gap:5px;margin-left:9px;align-items:center}
-.act{width:34px;height:34px;flex:0 0 auto;border-radius:9px;
+.acts{display:flex;gap:6px;margin-left:10px;align-items:center}
+.act{width:38px;height:38px;flex:0 0 auto;border-radius:10px;
   background:var(--raised);border:1px solid var(--line);color:var(--dim);
-  display:flex;align-items:center;justify-content:center;font-size:15px;
+  display:flex;align-items:center;justify-content:center;
   transition:background .12s,color .12s,border-color .12s}
+.acts svg,.xport svg{display:block;flex:0 0 auto}
 .act:active{background:var(--gold);border-color:var(--gold);color:#0B0E13}
 .act.warn:active{background:var(--warn);border-color:var(--warn);color:#0B0E13}
 .act[disabled]{opacity:.3}
@@ -371,11 +377,23 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
   <header class="top">
     <div class="brand">Stacks<small>CHORD PROGRESSIONS</small></div>
     <button id="xport" class="xport" aria-label="Play the progression"
-            aria-pressed="false"><span id="xportGlyph">&#9654;</span></button>
+            aria-pressed="false"></button>
     <div class="acts">
-      <button id="actUndo" class="act" aria-label="Undo">&#8630;</button>
-      <button id="actRedo" class="act" aria-label="Redo">&#8631;</button>
-      <button id="actDel" class="act warn" aria-label="Delete the selected chord">&#9003;</button>
+      <button id="actUndo" class="act" aria-label="Undo"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 10h10a5 5 0 0 1 0 10h-3"/><polyline points="8 6 4 10 8 14"/>
+      </svg></button>
+      <button id="actRedo" class="act" aria-label="Redo"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M20 10H10a5 5 0 0 0 0 10h3"/><polyline points="16 6 20 10 16 14"/>
+      </svg></button>
+      <!--
+        MINUS, NOT A TRASHCAN. A bin means "destroy this object, permanently";
+        this takes one slot out of a sequence and undo puts it back. The strip
+        already carries the other half of the pair -- its "+" is how a chord is
+        added -- so the counterpart reads without a legend.
+      -->
+      <button id="actDel" class="act warn" aria-label="Remove the selected chord"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6 12h12"/>
+      </svg></button>
     </div>
     <div class="chips">
       <span id="demoBadge" class="demo" hidden>DEMO</span>
@@ -1361,6 +1379,10 @@ cv.addEventListener("pointerdown", function(e){
     set("preview", on ? "off" : "loop");
   };
 })();
+var XP_PLAY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" '
+  + 'aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>';
+var XP_STOP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" '
+  + 'aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>';
 function paintTransport(){
   /* Delete is refused at one chord by the module; say so rather than no-op. */
   var del = document.getElementById("actDel");
@@ -1369,7 +1391,7 @@ function paintTransport(){
   var btn = document.getElementById("xport");
   btn.setAttribute("aria-pressed", String(on));
   btn.setAttribute("aria-label", on ? "Stop the progression" : "Play the progression");
-  document.getElementById("xportGlyph").innerHTML = on ? "&#9632;" : "&#9654;";
+  btn.innerHTML = on ? XP_STOP : XP_PLAY;
 }
 
 /* ═══════════════════════════════ boot ═════════════════════════ */
