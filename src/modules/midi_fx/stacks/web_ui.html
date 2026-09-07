@@ -974,7 +974,12 @@ var BANKS = [
   { id:"clip",  name:"CLIP",  scope:"prog",
     /* `preview` moved to the header transport button; `run` stays, it is a
        mode (follow Move's clock) rather than a transport. */
-    keys:["read","read_mode","stamp","stamp_mode","clear","lanes","run",
+    /* No stamp_mode: `write file` is off the UI on both surfaces. It cannot
+       win against Move -- the active set is held in memory and autosaved over,
+       measured at 142s -- so the choice only offered a mode that silently
+       loses. The param survives for state compatibility and defaults to rec
+       arm; the stamp button asserts that mode when it fires. */
+    keys:["read","read_mode","stamp","clear","lanes","run",
           "duplicate","stretch","compress","undo"] },
 ];
 var bank = "chord";
@@ -1402,16 +1407,22 @@ function actionControl(k){
    * was taken for. The label says which one you are about to get.
    */
   var label = name(k) || k;
-  if (k === "stamp" && String(get("stamp_mode")) === "rec arm")
-    label = "Arm 1 lap";
+  /* One stamp, one meaning. The mode is no longer a question the UI asks. */
+  if (k === "stamp") label = "Arm 1 lap";
   b.textContent = label.toUpperCase();
   b.setAttribute("aria-label", label);
   b.onclick = function(){
+    if (k === "stamp"){
+      /* Assert the mode rather than trust it: a preset saved before this
+         change can still restore `write file`, and that write would be
+         overwritten by Move without saying so. */
+      set("stamp_mode", "rec arm");
+      set(k, "on");
+      noteArmed();          /* it waits for Move; it starts nothing */
+      return;
+    }
     set(k, "on");
-    /* A rec-arm stamp starts nothing: it waits for Move. Say so, rather than
-       reporting a job that is not running yet. */
-    if (k === "stamp" && String(get("stamp_mode")) === "rec arm"){ noteArmed(); return; }
-    if (k === "stamp" || k === "read"){ noteJobStarted(); pollStatus(); }
+    if (k === "read"){ noteJobStarted(); pollStatus(); }
   };
   return b;
 }

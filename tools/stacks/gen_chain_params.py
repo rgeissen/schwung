@@ -87,7 +87,7 @@ SHORT = {
  "roll_vel":"RVL","hum_time":"HTM","roll_time":"RTM","read":"RD",
  "read_mode":"RDM","stamp":"ST","stamp_mode":"STM","clear":"CLR",
  "lanes":"LAN","preview":"PRV","genre":"GEN","progression":"PRG","colour":"COL",
- "common":"CMN","uncommon":"UNC",
+ "common":"CMN","uncommon":"UNC","undo":"UND",
 }
 BANK_ORDER = [("MAIN","root"),("START","start"),("CHORD","chord"),
               ("VOICE","voice"),("FEEL","feel"),("CLIP","clip")]

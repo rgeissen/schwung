@@ -783,7 +783,7 @@
       },
       {
         "key": "stamp_mode",
-        "name": "Stamp Mode",
+        "name": "Stamp Mode (legacy)",
         "short_name": "StMod",
         "options_as_string": true,
         "type": "enum",
@@ -1222,9 +1222,6 @@
             "key": "stamp"
           },
           {
-            "key": "stamp_mode"
-          },
-          {
             "key": "clear"
           },
           {
@@ -1235,17 +1232,20 @@
           },
           {
             "key": "run"
+          },
+          {
+            "key": "undo"
           }
         ],
         "knobs": [
           "read",
           "read_mode",
           "stamp",
-          "stamp_mode",
           "clear",
           "lanes",
           "preview",
-          "run"
+          "run",
+          "undo"
         ]
       },
       "start": {

@@ -484,7 +484,7 @@ const BANKS = [
     { name: "CHORD", keys: [["root","RT","Root"], ["coct","OCT","Chord Oct"], ["family","FAM","Shape Family"], ["shape","SHP","Chord Shape"], ["inv","INV","Inversion"], ["len","LEN","Length"], ["off","OFF","Offset"], ["cvel","VEL","Chord Vel"]] },
     { name: "VOICE", keys: [["ccolour","COL","Colour"], ["cstrum","STR","Strum"], ["cgate","GAT","Chord Gate"], ["cmute","MUT","Mute"], ["rhythm","RHY","Rhythm"], ["ctrans","TRN","Transpose"], [null,"",""], [null,"",""]] },
     { name: "FEEL", keys: [["octave","OCT","Octave"], ["velocity","VEL","Velocity"], ["gate","GAT","Gate"], ["swing","SWG","Swing"], ["hum_vel","HVL","Human Vel"], ["roll_vel","RVL","Randomize Vel"], ["hum_time","HTM","Human Time"], ["roll_time","RTM","Randomize Time"]] },
-    { name: "CLIP", keys: [["read","RD","Read Clip"], ["read_mode","RDM","Read Mode"], ["stamp","ST","Stamp Clip"], ["stamp_mode","STM","Stamp Mode"], ["clear","CLR","Clear"], ["lanes","LAN","Note Lanes"], ["preview","PRV","Preview"], ["run","RUN","Run"]] },
+    { name: "CLIP", keys: [["read","RD","Read Clip"], ["read_mode","RDM","Read Mode"], ["stamp","ST","Stamp Clip"], ["clear","CLR","Clear"], ["lanes","LAN","Note Lanes"], ["preview","PRV","Preview"], ["run","RUN","Run"], ["undo","UND","Undo"]] },
 ];
 
 /* Values shortened to fit 16px. A truncation that reads beats a word that

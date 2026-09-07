@@ -638,13 +638,24 @@ The panel owns the ARMED indicator, because the module publishes no such state
 and the alternative is a button that looks dead: pressing it starts nothing, so
 without a word on screen there is nothing between the press and the transport.
 
-#### Stamp means two different things, and the button must say which
+#### `write file` is gone from the UI, and the param stays
 
-`stamp_mode` defaults to **rec arm**, which writes no file: it restarts the
-progression and plays ONE LAP for Move to record into an armed track. Pressed
-with nothing armed it is silent, and is indistinguishable from a broken stamp —
-which is exactly what it was taken for. Only `write file` splices `Song.abl`.
-The button is labelled from the mode.
+Stamp offered two modes and one of them could not work: writing the active
+set's `Song.abl` is overwritten by Move within a couple of minutes (measured at
+142s, nothing touched). Offering the choice only invited the mode that silently
+loses, so it is off BOTH surfaces — the panel's CLIP bank and the Move's — and
+the button reads `ARM 1 LAP` with no mode question attached.
+
+`stamp_mode` itself survives in `chain_params`, defaulting to `rec arm`, for one
+reason: it is a **positional field in the saved state blob**, so deleting it
+would renumber every field after it and restore every existing preset wrong.
+The stamp button ASSERTS the mode when it fires rather than trusting it —
+a preset saved before this change can still carry `write file`, and that write
+would be lost without saying so.
+
+Removing it from the Move's bank frees one of the eight slots, which `undo`
+takes; `ui_hierarchy.levels.clip` and `canvas.js`'s CLIP bank have to move
+together or `test_stacks_shapes.sh` fails on the mismatch.
 
 #### An action is the button, not a card containing its own name
 
