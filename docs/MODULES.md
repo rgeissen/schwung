@@ -577,6 +577,24 @@ by Move at 12:09 with the notes gone. That is why `stamp_mode` defaults to
 **rec arm**. `write file` is opt-in and only safe when Move will not write that
 set before you reload it.
 
+#### The lap begins on Move's downbeat, not on the button press
+
+`stamp` in rec-arm mode used to set `pulse = 0` the instant it was pressed,
+which puts the module's bar 1 wherever the finger landed while Move's clock
+carries on at its own position. A recorded lap then lined up only by luck, and
+no amount of care at the two ends could fix it — the user is being asked to
+synchronise two human-timed events on a downbeat.
+
+The press ARMS instead, and the transport says when: a MIDI Start is a downbeat
+by definition, and on an already-running clock the next bar line is
+`pulse % BAR_CLOCKS == 0`. Zeroing `pulse` there is what puts chord 1 on that
+bar, and it is what Start already did, so the two grids agree from that moment.
+A Stop cancels the arm, or it fires on the next unrelated transport start.
+
+The panel owns the ARMED indicator, because the module publishes no such state
+and the alternative is a button that looks dead: pressing it starts nothing, so
+without a word on screen there is nothing between the press and the transport.
+
 #### Stamp means two different things, and the button must say which
 
 `stamp_mode` defaults to **rec arm**, which writes no file: it restarts the

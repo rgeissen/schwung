@@ -907,6 +907,7 @@ typedef struct {
      *               the worker reports success.
      */
     int stamp_once;      /* rec arm: stop when the progression wraps */
+    int stamp_armed;     /* rec arm: waiting for Move's downbeat to begin */
     int stop_run_pending;/* write file: the worker asks, tick performs */
     double pulse_accum; /* internal clock, for preview with the transport stopped */
 
@@ -2291,11 +2292,46 @@ static int stk_process_midi(void *instance, const uint8_t *in, int in_len,
 
     /* Transport. Consumed, never passed on -- the chain's synth does not want
      * our clock and Move already has its own. */
-    if (status == 0xF8) { st->pulse++; return 0; }
-    if (status == 0xFA) { st->pulse = 0; st->clock_running = 1; st->armed_id = 0; return 0; }
+    /*
+     * THE LAP BEGINS ON MOVE'S DOWNBEAT, NOT ON THE BUTTON PRESS.
+     *
+     * `stamp` used to set pulse = 0 the instant it was pressed, which makes
+     * the module's bar 1 wherever the finger landed while Move's clock carries
+     * on at its own position -- so a recorded lap lined up only by luck, and
+     * no amount of care at the two ends could fix it. Pressing the button ARMS
+     * instead, and the start is taken from the transport: a MIDI Start is a
+     * downbeat by definition, and on an already-running clock the next bar
+     * line is `pulse % BAR_CLOCKS == 0`.
+     *
+     * Zeroing pulse there is what puts chord 1 on that bar, and it is the same
+     * thing Start itself does, so the module's grid and Move's agree from that
+     * moment on.
+     */
+    if (status == 0xF8) {
+        st->pulse++;
+        if (st->stamp_armed && st->clock_running && (st->pulse % BAR_CLOCKS) == 0) {
+            st->stamp_armed = 0;
+            st->pulse = 0;
+            st->armed_id = 0;
+            st->pend_n = 0;
+            st->run = 1;
+            st->stamp_once = 1;
+        }
+        return 0;
+    }
+    if (status == 0xFA) {
+        st->pulse = 0; st->clock_running = 1; st->armed_id = 0;
+        if (st->stamp_armed) {          /* a Start IS the downbeat */
+            st->stamp_armed = 0;
+            st->run = 1;
+            st->stamp_once = 1;
+        }
+        return 0;
+    }
     if (status == 0xFB) { st->clock_running = 1; return 0; }
     if (status == 0xFC) {
         st->clock_running = 0;
+        st->stamp_armed = 0;   /* a stop cancels a pending lap */
         st->armed_id = 0;
         st->pend_n = 0;
         st->cur_step = -1;
@@ -3469,14 +3505,17 @@ static void stk_set_param_inner(void *instance, const char *key, const char *val
             if (st->stamp_mode == 1) {
                 atomic_store(&st->req_stamp, atomic_load(&st->req_stamp) + 1);
             } else {
-                /* Record-arm mode: restart from the top so the pass Move
-                 * records begins at the downbeat of chord 1, and arm the
-                 * one-lap stop so you are not left doubling the clip you
-                 * just recorded. */
-                st->pulse = 0;
+                /* Record-arm mode: ARM, and let Move's transport say when.
+                 * See the clock handler -- the lap starts on a Start or on the
+                 * next bar line, so the pass Move records begins on a downbeat
+                 * rather than wherever the press landed. The one-lap stop is
+                 * armed with it, so nothing doubles the clip afterwards. */
+                st->stamp_armed = 1;
                 st->armed_id = 0;
-                st->run = 1;
-                st->stamp_once = 1;
+                if (!st->clock_running) {
+                    /* No clock to follow yet: the next Start begins the lap. */
+                    st->run = 0;
+                }
             }
         }
     } else if (strcmp(key, "clear") == 0) {

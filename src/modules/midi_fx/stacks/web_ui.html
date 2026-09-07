@@ -1384,11 +1384,14 @@ function actionControl(k){
    */
   var label = name(k) || k;
   if (k === "stamp" && String(get("stamp_mode")) === "rec arm")
-    label = "Play 1 lap to rec";
+    label = "Arm 1 lap";
   b.textContent = label.toUpperCase();
   b.setAttribute("aria-label", label);
   b.onclick = function(){
     set(k, "on");
+    /* A rec-arm stamp starts nothing: it waits for Move. Say so, rather than
+       reporting a job that is not running yet. */
+    if (k === "stamp" && String(get("stamp_mode")) === "rec arm"){ noteArmed(); return; }
     if (k === "stamp" || k === "read"){ noteJobStarted(); pollStatus(); }
   };
   return b;
@@ -1564,12 +1567,36 @@ var XP_STOP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColo
  * the module has answered. Two presses in a row each get their own report,
  * whatever the value did in between.
  */
+/*
+ * ARMED is a state the panel owns, because the module does not publish one and
+ * the alternative is a button that looks dead. Pressing the rec-arm stamp does
+ * not start anything -- it waits for Move's downbeat -- so without a word on
+ * screen there is nothing at all between the press and the transport, which is
+ * exactly how "it does nothing" gets reported. Cleared when the progression
+ * starts running (the lap has begun) or after a minute of no transport.
+ */
+var armedAt = 0;
+var ARM_MAX_MS = 60000;
+function noteArmed(){ armedAt = Date.now(); }
+function armedNow(){
+  if (!armedAt) return false;
+  if (prog && prog.running){ armedAt = 0; return false; }
+  if (Date.now() - armedAt > ARM_MAX_MS){ armedAt = 0; return false; }
+  return true;
+}
+
 var jobAt = 0, jobDone = 0;
 var STAT_HOLD_MS = 3500, JOB_MAX_MS = 20000;
 function noteJobStarted(){ jobAt = Date.now(); jobDone = 0; }
 function paintStatus(){
   var el = document.getElementById("stat");
   if (!el) return;
+  if (armedNow()){
+    el.hidden = false;
+    el.className = "stat working";
+    el.textContent = "ARMED \u00B7 PRESS RECORD";
+    return;
+  }
   if (!jobAt){ el.hidden = true; return; }
   var v = String(get("status") || "");
   var now = Date.now();
