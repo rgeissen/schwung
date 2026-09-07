@@ -989,8 +989,8 @@ function drawKeys(cx, x0, x1, lo, hi, yOf, laneH, key, lit, tint){
       } else {
         /* A touch of vertical shading, so a column of keys is not a flat slab. */
         var g = cx.createLinearGradient(0, y, 0, y + kh);
-        g.addColorStop(0, tonic ? "#DCD8F4" : "#E9EEF3");
-        g.addColorStop(1, tonic ? "#C9C3EA" : "#CBD3DC");
+        g.addColorStop(0, tonic ? "#CFC6F2" : "#E9EEF3");
+        g.addColorStop(1, tonic ? "#B3A6E4" : "#CBD3DC");
         cx.fillStyle = g;
       }
       if (cx.roundRect){
@@ -1021,15 +1021,38 @@ function drawKeys(cx, x0, x1, lo, hi, yOf, laneH, key, lit, tint){
        * wide, so aligning both to the gutter's edge would hang its label off
        * the end of the key it belongs to.
        */
-      if (on && laneH >= 8){
+      /*
+       * THE TONIC IS NAMED TOO, in its own ink.
+       *
+       * Dropping the fixed C labels took the tonic's name with them and left
+       * only the violet tint, which is a whisper next to a white key -- the
+       * root became something you had to hunt for. Two labels, two inks: dark
+       * on the lit key for a chord tone, violet for the key centre. They never
+       * compete, because a tonic that IS a chord tone is lit, and lit wins.
+       */
+      if (laneH >= 8 && (on || tonic)){
         var pc = ((n % 12) + 12) % 12;
-        cx.fillStyle = "#0B0E13";
+        cx.fillStyle = on ? "#0B0E13" : "#5B4CA8";
         cx.font = "700 " + Math.min(9, Math.max(7, laneH - 3)) +
                   "px ui-monospace,SF Mono,monospace";
-        cx.textAlign = "right";
-        cx.fillText(NOTE[pc] + (Math.floor(n / 12) - 1),
-                    x0 + kw - 3, y + kh - 2);
-        cx.textAlign = "left";
+        /*
+         * The key centre reads at the KEY'S OWN CENTRE, hard left: it is a
+         * standing fact, so it sits still while the chord tones -- which come
+         * and go -- name themselves at the far edge. Two positions, two
+         * meanings, and the root never moves when a chord happens to land on
+         * it.
+         */
+        if (tonic){
+          cx.textBaseline = "middle";
+          cx.fillText(NOTE[pc] + (Math.floor(n / 12) - 1),
+                      x0 + 3, y + kh / 2);
+          cx.textBaseline = "alphabetic";
+        } else {
+          cx.textAlign = "right";
+          cx.fillText(NOTE[pc] + (Math.floor(n / 12) - 1),
+                      x0 + kw - 3, y + kh - 2);
+          cx.textAlign = "left";
+        }
       }
     }
   }
