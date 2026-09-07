@@ -172,8 +172,22 @@ button{font:inherit;color:inherit;border:0;background:none;padding:0}
 /* SIX columns, so a row can hold two controls or three. Cards declare their
    width in sixths (see SPAN): a full-width control spans 6, a pair spans 3,
    a trio spans 2. Two columns could only ever pair. */
+/*
+ * grid-auto-rows:min-content is LOAD-BEARING.
+ *
+ * With `auto` rows the tracks were sized against the pane's own height once
+ * the content outgrew it, so a row came out SHORTER than the card in it --
+ * and that one fault produced both bugs seen here, depending only on
+ * align-self. Stretched, the card was squeezed and `overflow:hidden` ate the
+ * bottom of the shape list (a list you could see past and not scroll to).
+ * Started, the card keeps its height and SPILLS into the row below, drawing
+ * over Inversion / Length / Offset.
+ *
+ * min-content tracks are sized by their contents and never by the leftover
+ * space, so a row always holds its card and the pane takes the overflow.
+ */
 .pane{padding:8px 10px calc(8px + var(--safe-b));overflow-y:auto;flex:1;min-height:0;
-  display:grid;grid-template-columns:repeat(6,1fr);
+  display:grid;grid-template-columns:repeat(6,1fr);grid-auto-rows:min-content;
   align-content:start;gap:5px;-webkit-overflow-scrolling:touch}
 /* min-width:0 on the flex/grid child, or long values push the card wider
    than the rail and the pane scrolls sideways. */

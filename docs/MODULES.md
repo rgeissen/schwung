@@ -525,6 +525,22 @@ Two things had to change in the manager, and the second is the one that hides:
   all 53 real params. `stateCoversParams` now requires the snapshot to contain
   at least one key the component actually declares.
 
+#### `grid-auto-rows: min-content`, and why one line caused two opposite bugs
+
+With `auto` rows the tracks are sized against the pane's own height once the
+content outgrows it, so a row comes out SHORTER than the card in it. That
+single fault presents two ways depending only on `align-self`, which is why it
+was fixed twice and neither fix held: stretched, the card is squeezed and
+`overflow:hidden` eats the bottom of its list -- content you can see past and
+cannot scroll to, which reads as a broken scroller; started, the card keeps its
+height and SPILLS into the row below, drawing over the controls there.
+`min-content` tracks are sized by their contents and never by leftover space.
+
+Run `tools/stacks/check_panel_layout.py <host>` after any layout change: it
+audits every bank at four viewport sizes for overlap, clipping, escape, a
+last-card that scrolling cannot reach, and nested scrollers. Each of those
+checks exists because that fault shipped.
+
 #### One scroller per bank
 
 A capped, independently scrolling box inside a card (`.pick`) is a trap on a
