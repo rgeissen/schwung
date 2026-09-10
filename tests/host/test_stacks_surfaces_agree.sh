@@ -229,6 +229,51 @@ check(sel.length === 1 && sel[0] === "sel=4",
 process.exit(bad);
 JS
 
+# --- the playhead does not go BACKWARDS when the module reports often -----
+#
+# `posUnits` is floored to a whole unit, so a module truly at 3.7 reports 3.
+# Re-anchoring the drawn playhead on that pulls it BACK by up to a whole unit
+# -- an eighth of a step, a third of a second at 98bpm -- and it runs forward
+# until the next report pulls it back again.  Invisible while `prog` only
+# arrived after somebody wrote something; a visible judder in the middle of
+# every chord once both surfaces started asking several times a second.
+grep -q 'p.posUnits + 1.75' "$PANEL" \
+  || note "web_ui.html: the panel re-anchors on a floored report again -- the playhead will judder"
+grep -q 'parsed.posUnits + 1.75' "$CANVAS" \
+  || note "canvas.js: the staff re-anchors on a floored report again -- the playhead will judder"
+
+node - "$PANEL" <<'JS' || fail=1
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[2], "utf8");
+const m = src.match(/var aMs = 0, aU = 0[\s\S]*?\nfunction playhead\(p, now\)\{[\s\S]*?\n\}/);
+if (!m) { console.log("FAIL: web_ui.html: the playhead anchor could not be found"); process.exit(1); }
+let clock = 0;
+const mk = new Function("performance",
+    m[0] + "; return { reanchor: reanchor, playhead: playhead };");
+const api = mk({ now: () => clock });
+
+/* 98bpm, 8 units a step, 4 beats a step -> 2 units a second. Publishes land
+   every 500ms carrying the FLOORED position, exactly as the module sends it. */
+const P = (units) => ({ running: 1, bpm: 98, stepUnits: 8, stepBeats: 4,
+                        clipUnits: 32, posUnits: Math.floor(units) });
+const perSec = (98 / 60) * 2;
+let last = -1, worstBack = 0;
+for (let ms = 0; ms <= 4000; ms += 50) {
+    clock = ms;
+    const trueUnits = (ms / 1000) * perSec;
+    if (ms % 500 === 0) api.reanchor(P(trueUnits));
+    const drawn = api.playhead(P(trueUnits), clock);
+    if (last >= 0 && drawn < last) worstBack = Math.max(worstBack, last - drawn);
+    last = drawn;
+}
+if (worstBack > 0.05) {
+    console.log("FAIL: the playhead jumped BACK by " + worstBack.toFixed(2) +
+                " units across a publish -- that is the judder, on screen");
+    process.exit(1);
+}
+process.exit(0);
+JS
+
 # --- ARMED is published, not remembered -----------------------------------
 #
 # Rec-arm stamping waits for Move's downbeat, so between the press and the

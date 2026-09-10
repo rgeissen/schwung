@@ -196,8 +196,27 @@ gets wrong:
   `status` publishes `armed` now, both surfaces read it, the takeover blinks a
   mark and toasts `REC + PLAY` (it cannot press Record itself -- the shim
   claims CC 118). Arming also PARKS `run` so nothing sounds before the
-  downbeat, and a cancel must put it back or the module goes silent for a
-  reason nothing on screen mentions.
+  downbeat, and **every exit must put it back**: a cancel, and the take itself.
+  Stopping after one lap REQUIRES `run = 0` (the sequencer follows it, and the
+  alternative is stopping Move), but leaving it off is an action silently
+  changing a setting -- the take ends and from then on **Move's play button
+  does nothing at all**, with nothing on either screen saying why. Run is owed
+  back and returns when that take's transport stops. Pressing the same control
+  while armed CANCELS, because a state whose only exit was Move's stop button
+  is a state the surface that entered it could not leave.
+- **A QUANTISED REPORT NAMES A RANGE, NOT A POINT.** `posUnits` is floored to a
+  whole unit, so a module truly at 3.7 reports 3, and re-anchoring the drawn
+  playhead on it pulls the head BACK by up to a unit -- an eighth of a step, a
+  third of a second at 98bpm -- before it runs forward to be pulled back again.
+  "Every read is a re-sync" was safe only while reads were rare; once both
+  surfaces asked several times a second it became a judder in the middle of
+  every chord. The anchor is kept while the drawn position lies inside
+  `[pos, pos+1)` and taken only outside it (a wrap, a jump, real drift). Two
+  traps: the slack must cover the age of the read, and "have we anchored" is a
+  FLAG -- testing the timestamp for truthiness makes a clock reading 0 look
+  like no anchor and snaps on every publish, which is the bug it was meant to
+  fix. `tests/host/test_stacks_surfaces_agree.sh` runs the anchor over a
+  simulated take and fails on a single backwards step.
 - **THE STAFF NAMES ITS CHORDS, at the foot, where the panel puts its cards.**
   Everything it drew was a SHAPE, and a shape is not a name -- you had to
   select a chord and read the CHORD bank to learn it was Amaj7, one at a time,

@@ -909,6 +909,7 @@ typedef struct {
     int stamp_once;      /* rec arm: stop when the progression wraps */
     int stamp_armed;     /* rec arm: waiting for Move's downbeat to begin */
     int stamp_run_prev;  /* what Run was before arming turned it off */
+    int stamp_restore;   /* Run is owed back once the take's transport stops */
     int stop_run_pending;/* write file: the worker asks, tick performs */
     double pulse_accum; /* internal clock, for preview with the transport stopped */
 
@@ -2371,6 +2372,10 @@ static int stk_process_midi(void *instance, const uint8_t *in, int in_len,
             atomic_store(&st->status, 0);
             st->run = st->stamp_run_prev;
         }
+        if (st->stamp_restore) {       /* the take is over: give Run back */
+            st->run = 1;
+            st->stamp_restore = 0;
+        }
         st->stamp_armed = 0;
         st->armed_id = 0;
         st->pend_n = 0;
@@ -2550,6 +2555,16 @@ static int stk_tick(void *instance, int frames, int sample_rate,
         if (st->stamp_once && cycle >= 1) {
             st->stamp_once = 0;
             atomic_store(&st->status, 2);   /* one lap played: that is the take */
+            /*
+             * RUN IS OWED BACK. Stopping after one lap REQUIRES switching Run
+             * off -- the sequencer follows it, so there is no other way to
+             * stop without stopping Move -- but leaving it off is a setting
+             * silently changed by an action: the take ends, and from then on
+             * pressing play on the Move does nothing at all, with nothing on
+             * either screen saying why. Reported exactly that way. It comes
+             * back when the transport this take belongs to stops.
+             */
+            st->stamp_restore = st->stamp_run_prev;
             st->run = 0;
             st->armed_id = 0;
             st->pend_n = 0;
@@ -3542,6 +3557,18 @@ static void stk_set_param_inner(void *instance, const char *key, const char *val
             if (g_host && g_host->slot_recv_channel) {
                 int ch = g_host->slot_recv_channel(st);
                 if (ch >= 1 && ch <= 4) st->recv_ch = ch;
+            }
+            if (st->stamp_armed) {
+                /*
+                 * ARMED IS A STATE YOU CAN LEAVE. Pressing again was a second
+                 * arm, so the only way out was Move's stop button -- a state
+                 * the surface that entered it could not exit. Pressing the
+                 * same control takes it back, Run included.
+                 */
+                st->stamp_armed = 0;
+                st->run = st->stamp_run_prev;
+                atomic_store(&st->status, 0);
+                return;
             }
             if (st->stamp_mode == 1) {
                 atomic_store(&st->req_stamp, atomic_load(&st->req_stamp) + 1);

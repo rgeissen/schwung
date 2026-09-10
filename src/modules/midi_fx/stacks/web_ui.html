@@ -942,12 +942,39 @@ function selIndex(p){
   return p ? p.sel : 1;
 }
 
-var aMs = 0, aU = 0;
-function reanchor(p){ aMs = performance.now(); aU = p ? p.posUnits : 0; }
+var aMs = 0, aU = 0, aSet = false;
+/*
+ * A QUANTISED REPORT NAMES A RANGE, NOT A POINT.
+ *
+ * `posUnits` is floored to a whole unit, so a module truly at 3.7 reports 3.
+ * Re-anchoring on every publish therefore pulls the drawn head BACK by up to a
+ * whole unit -- an eighth of a step, a third of a second at 98bpm -- and it
+ * runs forward until the next publish pulls it back again. That was invisible
+ * while `prog` only arrived after something was written; with the heartbeat
+ * carrying the transport twice a second it is a judder in the middle of every
+ * chord.
+ *
+ * The report is an INTERVAL, [pos, pos+1). While the drawn position is inside
+ * it the picture and the module agree, and the anchor is left alone. Outside
+ * it -- a wrap, a transport jump, real drift -- it is taken. Slack either side
+ * covers how old the read already was when it reached the browser.
+ */
+function unitsPerSec(p){ return (p.bpm / 60) * ((p.stepUnits || 8) / (p.stepBeats || 4)); }
+function reanchor(p){
+  if (!p){ aMs = performance.now(); aU = 0; aSet = true; return; }
+  var now = performance.now();
+  /* `aSet`, not `aMs`: a clock legitimately reads 0, and testing the timestamp
+     for truthiness made the first anchor look like no anchor -- which snapped
+     on every publish, i.e. exactly the judder this avoids. */
+  if (aSet && p.running){
+    var pred = aU + ((now - aMs) / 1000) * unitsPerSec(p);
+    if (pred >= p.posUnits - 0.25 && pred < p.posUnits + 1.75) return;  /* agreed */
+  }
+  aMs = now; aU = p.posUnits; aSet = true;
+}
 function playhead(p, now){
   if (!p || !p.running) return null;
-  var upBeat = (p.stepUnits||8)/(p.stepBeats||4);
-  var u = aU + ((now - aMs)/1000) * (p.bpm/60) * upBeat, c = Math.max(1, p.clipUnits);
+  var u = aU + ((now - aMs)/1000) * unitsPerSec(p), c = Math.max(1, p.clipUnits);
   return ((u % c) + c) % c;
 }
 
@@ -1891,10 +1918,23 @@ function armedNow(){ return String(get("status")) === "armed"; }
 var jobAt = 0, jobDone = 0;
 var STAT_HOLD_MS = 3500, JOB_MAX_MS = 20000;
 function noteJobStarted(){ jobAt = Date.now(); jobDone = 0; }
+/*
+ * A REC-ARM TAKE ENDS ON ITS OWN, so its verdict is read from the TRANSITION
+ * working -> ok rather than from a press. That is the opposite of the rule
+ * below for the file write, and for the opposite reason: `status` latches at
+ * ok there, so a second stamp would show nothing; here armed and working are
+ * transient, so the transition is real and it is the only notice there is --
+ * the lap finishes while you are looking at the Move.
+ */
+var lastStat = "", takeDoneAt = 0;
 function paintStatus(){
   var el = document.getElementById("stat");
   if (!el) return;
   var v = String(get("status") || "");
+  if (v !== lastStat){
+    if (lastStat === "working" && v === "ok" && !jobAt) takeDoneAt = Date.now();
+    lastStat = v;
+  }
   if (armedNow()){
     el.hidden = false;
     el.className = "stat working";
@@ -1914,6 +1954,15 @@ function paintStatus(){
     el.className = "stat working";
     el.textContent = "RECORDING";
     return;
+  }
+  if (takeDoneAt){
+    if (Date.now() - takeDoneAt < STAT_HOLD_MS){
+      el.hidden = false;
+      el.className = "stat ok";
+      el.textContent = "TAKE RECORDED";
+      return;
+    }
+    takeDoneAt = 0;
   }
   if (!jobAt){ el.hidden = true; return; }
   var now = Date.now();

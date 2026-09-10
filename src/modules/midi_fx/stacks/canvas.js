@@ -773,6 +773,7 @@ const S = {
     toast: "",       /* what the last page movement did */
     toastAt: 0,
     status: "idle",  /* the module's own word for what a stamp is doing */
+    anchored: false, /* whether anchorMs has been set at all */
     trigKnob: -1,    /* knob whose trigger already fired this gesture */
     trigAt: 0,       /* when it fired, for the latch */
     holdCC: -1,      /* an edit button being held, for the long press */
@@ -845,9 +846,37 @@ function refresh(ctx) {
              */
             if (parsed.bpm > 20 && parsed.bpm < 300) S.bpm = parsed.bpm;
             const upb = (parsed.stepUnits || 8) / (parsed.stepBeats || 4);
-            const secs = parsed.posUnits / (upb * (S.bpm / 60));
-            S.anchorMs = (typeof ctx.now === "function" ? ctx.now() : Date.now())
-                       - secs * 1000;
+            const uPerSec = upb * (S.bpm / 60);
+            const nowMs = (typeof ctx.now === "function" ? ctx.now() : Date.now());
+            const want = nowMs - (parsed.posUnits / uPerSec) * 1000;
+            /*
+             * A QUANTISED REPORT NAMES A RANGE, NOT A POINT -- and re-anchoring
+             * on it every time is what made the playhead STUTTER.
+             *
+             * `posUnits` is floored to a whole unit, so a module truly at 3.7
+             * reports 3. Snapping the anchor to that pulls the drawn head BACK
+             * by up to a whole unit -- an eighth of a step, a third of a second
+             * at 98bpm -- and it then runs forward until the next read pulls it
+             * back again. Harmless while reads were rare and only happened when
+             * you touched something; four times a second (see onPoll) it is a
+             * visible judder in the middle of every chord.
+             *
+             * So the report is treated as the interval it actually is:
+             * [pos, pos+1). While the drawn position is inside it, the picture
+             * and the module agree and nothing moves. Outside it -- a loop
+             * wrap, a transport jump, real drift -- the anchor is taken. The
+             * slack either side covers the age of the read itself.
+             */
+            const pred = ((nowMs - S.anchorMs) / 1000) * uPerSec;
+            /* S.anchored, never `S.anchorMs` -- a clock legitimately reads 0,
+             * and a truthiness test on the timestamp makes the first anchor
+             * look like no anchor, snapping on every read. */
+            if (!S.anchored || !parsed.running
+                || !(pred >= parsed.posUnits - 0.25
+                     && pred < parsed.posUnits + 1.75)) {
+                S.anchorMs = want;
+                S.anchored = true;
+            }
             S.prog = parsed;
             /*
              * THE CURSOR IS NOT A SECOND COPY OF THE SELECTION.
@@ -1502,7 +1531,18 @@ globalThis.canvas_overlay = {
          * make this screen right exactly half the time.
          */
         const st = ctx.getParam("status");
-        if (st !== null && st !== undefined) S.status = String(st);
+        if (st !== null && st !== undefined) {
+            const was = S.status;
+            S.status = String(st);
+            /*
+             * The ENDS of a take are as worth saying as the start, and both
+             * can be caused by the other surface or by Move's own stop button
+             * -- so they are reported from the polled TRANSITION rather than
+             * from anything this screen did.
+             */
+            if (was === "working" && S.status === "ok") say(ctx, "TAKE RECORDED");
+            else if (was === "armed" && S.status === "idle") say(ctx, "ARM CANCELLED");
+        }
         if (!S.prog) return;
         if (bankSig(S.prog) === S.bankSig) return;
         const now = typeof ctx.now === "function" ? ctx.now() : Date.now();
