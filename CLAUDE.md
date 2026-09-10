@@ -186,6 +186,16 @@ gets wrong:
   absolute duration now -- eighths of a bar, always -- and Rate only chooses
   what a NEW chord gets. The fix DELETED code, which is the usual sign the cut
   is in the right place.
+- **THE STAFF NAMES ITS CHORDS, at the foot, where the panel puts its cards.**
+  Everything it drew was a SHAPE, and a shape is not a name -- you had to
+  select a chord and read the CHORD bank to learn it was Amaj7, one at a time,
+  which is what a picture of the whole progression exists to save you. Two
+  rules: the tiny font is UPPERCASE-ONLY and that is fine because the module
+  spells quality in full (AMAJ7 / AMIN7, never an ambiguous AM7); and a name is
+  truncated but **never inside the ROOT** -- one glyph of "C#M7" is "C", a
+  different chord printed with nothing to say it was cut, so a block too narrow
+  for the root goes unnamed and the 6px band is not taken at all when no block
+  can hold one.
 - **A MOMENTARY THAT MISSES ITS RELEASE PLAYS FOREVER, and `preview` off does
   not stop it.** Stacks sounds for three reasons -- its own `preview` loop, a
   `play` hold, and MOVE'S TRANSPORT while Run is on -- so a transport button

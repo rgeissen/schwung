@@ -221,5 +221,75 @@ check(sel.length === 1 && sel[0] === "sel=4",
 process.exit(bad);
 JS
 
+# --- the staff names its chords, and never names them WRONG ---------------
+#
+# Rendered into a framebuffer, because both rules are about pixels: a block too
+# narrow for "C#" must be left unnamed rather than printed as "C" (a different
+# chord, with nothing to say it was cut), and the 6px band must not be taken
+# out of a ~54px staff when nothing can go in it.
+node - "$CANVAS" <<'JS' || fail=1
+const fs = require("fs"), vm = require("vm");
+const src = fs.readFileSync(process.argv[2], "utf8");
+const W = 128, H = 64;
+function render(chords) {
+    const fb = new Uint8Array(W * H);
+    const px = (x, y, v) => { x = Math.round(x); y = Math.round(y);
+        if (x >= 0 && y >= 0 && x < W && y < H) fb[y * W + x] = v ? 1 : 0; };
+    const prog = "v13|" + chords.length + "|1|-1|8|5ad|9|32|0|4|98|0|0|"
+        + chords.map(([c, len]) => c + ",A3,0," + len + ",0,100,0,1,57:100.61:100.64:100.68:100").join(";");
+    const ctx = { width: W, height: H, state: {}, clear(){ fb.fill(0); }, setPixel: px,
+        fillRect(x,y,w,h,v){ for (let j=0;j<h;j++) for (let i=0;i<w;i++) px(x+i,y+j,v); },
+        drawRect(x,y,w,h,v){ for(let i=0;i<w;i++){px(x+i,y,v);px(x+i,y+h-1,v);}
+                             for(let j=0;j<h;j++){px(x,y+j,v);px(x+w-1,y+j,v);} },
+        drawLine(){}, print(){}, now(){ return 5000; }, random(){ return 0.5; },
+        getValue(){ return ""; }, setValue(){ return true; },
+        getParam(k){ return k === "prog" ? prog : "0"; }, setParam(){ return true; },
+        sourcePath(){ return ""; } };
+    const sandbox = { console, Date, Math, JSON, parseInt, parseFloat, Number, isFinite,
+                      isNaN, String, Array, Object, Set, Map, performance, Uint8Array };
+    sandbox.globalThis = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(src, sandbox, { filename: "canvas.js" });
+    const ov = sandbox.canvas_overlay;
+    ov.onOpen(ctx); ctx.clear(); ov.draw(ctx);
+    /* Ink in the name band at the FOOT of the staff, by column. */
+    return (x0, x1) => {
+        let ink = 0;
+        for (let y = 58; y < 64; y++) for (let x = x0; x < x1; x++) ink += fb[y * W + x];
+        return ink;
+    };
+}
+let bad = 0;
+
+/* Four wide chords: every one of them says its name. */
+const wide = render([["Amaj7", 8], ["Dmin7", 8], ["Emaj7", 8], ["Amin7", 8]]);
+if (wide(0, W) < 40) {
+    console.log("FAIL: four wide chords drew " + wide(0, W) +
+                " pixels of name -- the staff has stopped naming them");
+    bad = 1;
+}
+
+/*
+ * TWO BLOCKS OF THE SAME WIDTH, one of which must refuse. At 8px a block holds
+ * ONE glyph: enough for "A", not for "C#" -- and one glyph of "C#M7" is "C",
+ * a chord that is not in the progression, printed with nothing to say it was
+ * cut. Slots: 14 units of A, then 2 of C#m7 (x 56..64), then 2 of Am7
+ * (x 64..72), then 14 of D. clipU is 32 and the staff is 128 wide, so a unit
+ * is 4px.
+ */
+const mixed = render([["Amaj7", 14], ["C#m7", 2], ["Am7", 2], ["Dmin7", 14]]);
+if (mixed(56, 64) !== 0) {
+    console.log("FAIL: a block too narrow for C# still drew " + mixed(56, 64) +
+                " pixels -- it can only be naming a chord that is not there");
+    bad = 1;
+}
+if (mixed(64, 72) === 0) {
+    console.log("FAIL: an 8px block whose root DOES fit was left unnamed -- " +
+                "the guard is refusing more than the root");
+    bad = 1;
+}
+process.exit(bad);
+JS
+
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "PASS: both surfaces follow one selection, and each is told when the other moves it"

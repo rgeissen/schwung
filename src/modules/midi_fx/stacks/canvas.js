@@ -1144,6 +1144,13 @@ function drawGroupMark(ctx, prog, W, y) {
 function drawRoll(ctx, prog, top, bottom) {
     const W = ctx.width;
     /*
+     * The band is worth 6 of the staff's ~54 pixels, and it is given up only
+     * while there is enough left to draw music in -- the grid scales to the
+     * notes present, so a tall chord in a short band is unreadable in a way a
+     * missing name is not.
+     */
+    let nameY = 0;
+    /*
      * An ALL-REST progression has no pitches, so there is no scale to compute
      * -- and returning here would draw a blank screen for the one state that
      * most needs to look deliberate: a freshly cleared buffer. The rests are
@@ -1157,6 +1164,26 @@ function drawRoll(ctx, prog, top, bottom) {
     const progU = Math.max(1, acc);
     const clipU = Math.max(progU, prog.clipUnits || progU);
     const xOf = (u) => Math.round((u * W) / clipU);
+
+    /*
+     * THE BAND IS ONLY TAKEN IF A NAME CAN GO IN IT. It costs 6 of the staff's
+     * ~54 pixels, so at sixteen chords -- 8px a block, not even room for "C#"
+     * -- reserving it would spend a tenth of the picture on nothing. Measured
+     * from the WIDEST chord rather than the average: one long chord among
+     * short ones can still be named, and the decision must not depend on where
+     * the playhead happens to be.
+     */
+    let widestU = 1;
+    for (const c of prog.chords) widestU = Math.max(widestU, Math.max(1, c.len));
+    const named = (bottom - top) > 34
+        && Math.round((widestU * W) / clipU) >= 2 * F3_W + 1;
+    /*
+     * THE NAMES SIT AT THE FOOT OF THE STAFF, where the browser panel puts its
+     * chord cards. Same picture, same reading order on both surfaces: pitches
+     * above, the names of what makes them along the bottom -- and one place to
+     * look for "which chord is this", whichever screen you are at.
+     */
+    if (named) { nameY = bottom - F3_H; bottom -= F3_H + 1; }
 
     if (sc) drawGrid(ctx, sc, prog, 0, W, top, bottom);
 
@@ -1176,17 +1203,20 @@ function drawRoll(ctx, prog, top, bottom) {
                 for (let y = top; y <= bottom; y += 3) ctx.fillRect(xOf(startU), y, 1, 1, 1);
             }
 
+            const isSel = pass === 0 && k === S.cursor;
             if (ch.rest) {
                 drawRest(ctx, x0, w, top, bottom);
                 /* The bracket is the SLOT's, so an empty slot still shows it. */
-                if (pass === 0 && k === S.cursor)
-                    drawSelection(ctx, x0, w, top, bottom);
+                if (isSel) drawSelection(ctx, x0, w, top, bottom);
                 continue;
             }
             if (!sc) continue;
             drawChordBlock(ctx, sc, ch, x0, w, top, bottom,
-                           pass === 0 && k === S.cursor, k === prog.playing,
-                           prog.stepUnits || 8);
+                           isSel, k === prog.playing, prog.stepUnits || 8);
+            /* Named LAST, so nothing drawn for the block can land on top of
+             * its own name -- and on every pass, because a repeat of the
+             * progression is as much a chord you are looking at as the first. */
+            if (named) drawChordName(ctx, ch, x0, w, nameY, isSel);
         }
     }
 }
@@ -1220,6 +1250,51 @@ function drawRest(ctx, x, w, top, bottom) {
  * does. A muted chord keeps its full shape but loses its fill, so you can see
  * what it WOULD play -- which is the difference between muting and deleting.
  */
+/*
+ * THE CHORD SAYS ITS NAME, on a 5px band above the grid.
+ *
+ * Everything the staff drew was a SHAPE -- pitches, hits, a contour -- and a
+ * shape is not a name: to know that the block you are looking at is Amaj7 you
+ * had to select it and read the CHORD bank, one chord at a time, which is
+ * exactly the thing a picture of the whole progression exists to save you.
+ *
+ * Three details, each of which the obvious version gets wrong on a 128x64
+ * screen with a 4px font:
+ *
+ *   * THE FONT IS UPPERCASE-ONLY, so it cannot spell the case distinction
+ *     chord names normally lean on. It does not have to: the module spells
+ *     quality in FULL ("Amaj7", "Amin7"), so uppercasing gives AMAJ7 / AMIN7
+ *     and never the ambiguous AM7. The two surfaces stay one vocabulary --
+ *     the panel's card and this band print the same letters.
+ *   * IT IS TRUNCATED, NOT DROPPED. Four glyphs of AMAJ7 is AMAJ, which still
+ *     says major; showing nothing because the whole name does not fit is how
+ *     a dense progression would go silent exactly when it is hardest to read.
+ *   * A REST IS NOT NAMED. Its own mark says what it is, and "REST" in the
+ *     band would be the only text on screen naming an absence.
+ */
+function drawChordName(ctx, ch, x, w, y, selected) {
+    if (ch.rest) return;
+    const glyphs = Math.floor((w - 1) / F3_W);
+    if (glyphs < 1) return;
+    let t = String(ch.name || "").toUpperCase();
+    if (!t || t === "REST") return;
+    /*
+     * NEVER TRUNCATE INSIDE THE ROOT. One glyph of "C#M7" is "C", which is not
+     * a shortened name -- it is a DIFFERENT CHORD, printed with no sign that
+     * anything was cut. Quality can be cut (AMAJ7 -> AMAJ still says major);
+     * the root cannot, so a block too narrow for "C#" is left unnamed.
+     */
+    const rootLen = (t[1] === "#" || t[1] === "B") && t.length > 2 ? 2 : 1;
+    if (glyphs < rootLen) return;
+    if (t.length > glyphs) t = t.slice(0, glyphs);
+    const tw = tinyWidth(t);
+    ctx.fillRect(x, y, Math.min(tw + 1, w), F3_H + 1, 0);   /* clear behind */
+    tinyPrint(ctx, x + 1, y, t);
+    /* The selected chord's name is UNDERLINED, so the name band and the
+     * bracket in the grid above it are visibly about the same chord. */
+    if (selected) ctx.fillRect(x, y + F3_H, Math.min(tw + 1, w), 1, 1);
+}
+
 function drawChordBlock(ctx, sc, ch, x, w, top, bottom, selected, playing, stepUnits) {
     const vel = Number.isFinite(ch.vel) ? ch.vel : 100;
     const dense = ch.mute ? 0 : (vel >= 96 ? 3 : vel >= 64 ? 2 : 1);
