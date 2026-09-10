@@ -23,7 +23,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHAIN="$ROOT/src/modules/chain/dsp/chain_midi_chain.h"
 HOST="$ROOT/src/modules/chain/dsp/chain_host.c"
-PANEL="$ROOT/src/modules/midi_fx/stacks/web_ui.html"
+# The panel-side half of this (a module's own bypass control writing
+# <component>:bypassed rather than a slot key) is pinned in the module
+# repo that ships one; what is pinned here is the HOST behaviour.
+PANEL=""
 fail=0
 
 # 1. An inactive stage is SKIPPED, not a reason to drop or stop.
@@ -53,19 +56,9 @@ if grep -qE 'midi_fx_bypassed\[(0|1)\] *=' "$HOST"; then
 fi
 
 # 3. The panel bypasses ITSELF, wherever it is loaded.
-if ! grep -q 'var COMP = (R && R.component) || "midi_fx1";' "$PANEL"; then
-  echo "FAIL: the panel no longer takes its component from the host"
-  fail=1
-fi
-if grep -qE 'setParam\("midi_fx1:bypassed"|set\("midi_fx1:bypassed"' "$PANEL"; then
-  echo "FAIL: the panel writes a hard-coded midi_fx1:bypassed -- loaded in"
-  echo "      another slot it would bypass somebody else's module"
-  fail=1
-fi
-if ! grep -q 'set("bypassed"' "$PANEL"; then
-  echo "FAIL: the panel's bypass control is missing"
-  fail=1
-fi
+# (The panel-side assertions moved to the module repo that ships a panel:
+#  a component-relative `set("bypassed", ...)` rather than a hard-coded
+#  "midi_fx1:bypassed". Nothing in THIS repo ships a web_ui.html to check.)
 
 [ "$fail" -eq 0 ] || exit 1
 echo "PASS: bypass skips one stage only -- synth keeps receiving, other MIDI FX untouched"

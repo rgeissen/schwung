@@ -146,7 +146,6 @@ mkdir -p ./build/modules/audio_fx/freeverb/
 mkdir -p ./build/modules/midi_fx/chord/
 mkdir -p ./build/modules/midi_fx/arp/
 mkdir -p ./build/modules/midi_fx/velocity_scale/
-mkdir -p ./build/modules/midi_fx/stacks/
 mkdir -p ./build/modules/midi_fx/sysex_probe/
 mkdir -p ./build/modules/sound_generators/linein/
 mkdir -p ./build/modules/sound_generators/voice-poc/
@@ -617,21 +616,6 @@ if needs_rebuild build/modules/midi_fx/velocity_scale/dsp.so \
         -Isrc -lm
 else
     echo "Skipping velocity scale MIDI FX (up to date)"
-fi
-
-# Build Stacks MIDI FX
-#
-# -lpthread: the clip reader runs on a worker thread, because parsing Song.abl
-# is file I/O and every MIDI FX entry point IS the SPI callback.
-if needs_rebuild build/modules/midi_fx/stacks/dsp.so \
-    src/modules/midi_fx/stacks/dsp/stacks.c src/host/midi_fx_api_v1.h; then
-    echo "Building stacks MIDI FX..."
-    "${CROSS_PREFIX}gcc" -g -O3 -shared -fPIC \
-        src/modules/midi_fx/stacks/dsp/stacks.c \
-        -o build/modules/midi_fx/stacks/dsp.so \
-        -Isrc -lm -lpthread
-else
-    echo "Skipping stacks MIDI FX (up to date)"
 fi
 
 # Build SysEx Probe MIDI FX — a hardware TEST FIXTURE, not a shipped module.
