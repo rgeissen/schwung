@@ -908,6 +908,7 @@ typedef struct {
      */
     int stamp_once;      /* rec arm: stop when the progression wraps */
     int stamp_armed;     /* rec arm: waiting for Move's downbeat to begin */
+    int at_downbeat;     /* Start seen, its first clock not yet counted */
     int stamp_run_prev;  /* what Run was before arming turned it off */
     int stamp_restore;   /* Run is owed back once the take's transport stops */
     int stop_run_pending;/* write file: the worker asks, tick performs */
@@ -2335,7 +2336,29 @@ static int stk_process_midi(void *instance, const uint8_t *in, int in_len,
      * moment on.
      */
     if (status == 0xF8) {
-        st->pulse++;
+        /*
+         * THE FIRST CLOCK AFTER START **IS** THE DOWNBEAT, so it does not
+         * advance anything -- it IS pulse 0.
+         *
+         * Counting it made `pulse` one ahead of the music forever, and the
+         * module fired everything a clock early: measured natively at 95
+         * clocks for a bar line that belongs at 96, with chord 1 sounding at
+         * the Start message itself, before the downbeat had happened at all.
+         * On the device that is every note of a stamped take sitting just
+         * before the line it belongs on -- and the error is TEMPO-SCALED, one
+         * clock being 20.8ms at 120 BPM and 125ms at 20.
+         *
+         * The shim carries the same war story, measured at two tempos, in
+         * src/host/transport_grid.h: two consumers there had this identical
+         * off-by-one because the fact was never written down. This is a third.
+         * It is fixed at the COUNTER here rather than in the consumers because
+         * this module's `pulse` has a second producer -- the internal clock an
+         * audition runs on, which has no Start and no downbeat to be offset
+         * from -- so a correction applied at the reading sites would have to
+         * know which clock it was reading, and there are a dozen of them.
+         */
+        if (st->at_downbeat) st->at_downbeat = 0;   /* this clock is pulse 0 */
+        else st->pulse++;
         if (st->stamp_armed && st->clock_running && (st->pulse % BAR_CLOCKS) == 0) {
             st->stamp_armed = 0;
             atomic_store(&st->status, 1);   /* working: the lap Move records */
@@ -2349,6 +2372,7 @@ static int stk_process_midi(void *instance, const uint8_t *in, int in_len,
     }
     if (status == 0xFA) {
         st->pulse = 0; st->clock_running = 1; st->armed_id = 0;
+        st->at_downbeat = 1;   /* the next clock is the downbeat, not the one after */
         if (st->stamp_armed) {          /* a Start IS the downbeat */
             st->stamp_armed = 0;
             atomic_store(&st->status, 1);   /* working: the lap Move records */
@@ -2357,9 +2381,12 @@ static int stk_process_midi(void *instance, const uint8_t *in, int in_len,
         }
         return 0;
     }
-    if (status == 0xFB) { st->clock_running = 1; return 0; }
+    /* Continue resumes MID-STREAM -- there is no downbeat to wait for, and
+     * claiming one would swallow a clock and shift the phase the other way. */
+    if (status == 0xFB) { st->clock_running = 1; st->at_downbeat = 0; return 0; }
     if (status == 0xFC) {
         st->clock_running = 0;
+        st->at_downbeat = 0;
         /*
          * A stop CANCELS a pending lap, so it must also retract the word AND
          * PUT RUN BACK. Arming switches Run off so the module is silent until
@@ -2455,7 +2482,15 @@ static int stk_tick(void *instance, int frames, int sample_rate,
     }
 
 
-    int free_running = (st->clock_running && st->run) || st->hold_run;
+    /*
+     * NOT BETWEEN START AND THE FIRST CLOCK. The transport is running there
+     * but the downbeat has not arrived, and a sequencer that starts on the
+     * Start message plays chord 1 early by whatever gap Move leaves before its
+     * first clock -- which the native measurement caught as a note sounding
+     * with the count still at zero.
+     */
+    int free_running = (st->clock_running && st->run && !st->at_downbeat)
+                     || st->hold_run;
 
     /*
      * AN AUDITION NEEDS A CLOCK OF ITS OWN.

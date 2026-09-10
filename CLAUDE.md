@@ -204,6 +204,20 @@ gets wrong:
   back and returns when that take's transport stops. Pressing the same control
   while armed CANCELS, because a state whose only exit was Move's stop button
   is a state the surface that entered it could not leave.
+- **THE FIRST CLOCK AFTER START IS THE DOWNBEAT, and counting it made every
+  chord early.** `pulse` was zeroed on 0xFA and incremented by every 0xF8, so
+  it read 1 at the downbeat and the module fired a clock ahead of Move forever
+  -- reported from the device as "the chords are stamped too early". This is
+  the THIRD consumer to make the identical mistake; the other two are in
+  `src/host/transport_grid.h`, measured at two tempos. Measured natively here
+  as well (`tests/host/test_stacks_downbeat_phase.sh` drives Start + clocks and
+  records the clock each chord lands on): chord 1 sounded at the START MESSAGE,
+  before the downbeat existed, and the bar line came out at 95 instead of 96.
+  Fixed at the COUNTER, not at the reading sites, because this `pulse` has a
+  second producer -- the internal clock an audition self-runs on, which has no
+  Start to be offset from -- so a correction at the dozen reading sites would
+  have to know which clock it was reading. Nothing may sound between Start and
+  that first clock either.
 - **A QUANTISED REPORT NAMES A RANGE, NOT A POINT.** `posUnits` is floored to a
   whole unit, so a module truly at 3.7 reports 3, and re-anchoring the drawn
   playhead on it pulls the head BACK by up to a unit -- an eighth of a step, a
