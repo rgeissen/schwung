@@ -70,6 +70,17 @@ type RemoteUI struct {
 	// (FX knob drags) bump the rev per set_param, and servicing every kick with
 	// a 64KB read + full push melts the WiFi link. Guarded by mu.
 	lastToolFull time.Time
+
+	// extrasMu guards the viz.extra_keys pump's state, all keyed by
+	// "slot|component": the declared key list (so a push costs one read per key
+	// and not a chain_params read on top of them; invalidated when the slot
+	// poller sees that component's module change), when it last pushed, whether
+	// a push is in flight, and the last value sent for each key.
+	extrasMu    sync.Mutex
+	extrasKeys  map[string][]string
+	extrasLast  map[string]time.Time
+	extrasBusy  map[string]bool
+	extrasValue map[string]string
 }
 
 // ruClient represents a single WebSocket connection.
@@ -317,6 +328,7 @@ func (ru *RemoteUI) Start(ctx context.Context) {
 	go ru.refreshLoop(ctx)
 	go ru.toolTickLoop(ctx)
 	go ru.setRingConnectLoop(ctx)
+	go ru.extrasHeartbeatLoop(ctx)
 }
 
 // setRingConnectLoop connects the web param set ring EAGERLY at startup,
@@ -1644,6 +1656,11 @@ func (ru *RemoteUI) notifyLoop(ctx context.Context) {
 	// ("master_fx:fxN") rather than sharing the chain-slot maps above.
 	var lastResendMasterFx time.Time
 	pendingMasterFxResend := make(map[string]bool) // comp -> needs full re-send
+	// A change to ANY of a component's params can move its derived viz.extra
+	// keys, and no write ever names those — see pushExtraKeys. Collected here
+	// and flushed on their own throttle, because they are what a custom panel
+	// draws with.
+	pendingExtras := make(map[uint8]map[string]bool) // slot -> comp -> extras stale
 
 	for {
 		select {
@@ -1658,7 +1675,8 @@ func (ru *RemoteUI) notifyLoop(ctx context.Context) {
 		}
 
 		changes := ring.Drain()
-		if len(changes) == 0 && len(pendingResend) == 0 && len(pendingMasterFxResend) == 0 {
+		if len(changes) == 0 && len(pendingResend) == 0 && len(pendingMasterFxResend) == 0 &&
+			len(pendingExtras) == 0 {
 			continue
 		}
 
@@ -1716,6 +1734,12 @@ func (ru *RemoteUI) notifyLoop(ctx context.Context) {
 					slotChanges[c.Slot] = m
 				}
 				m[c.Key] = c.Value
+				if i := strings.Index(c.Key, ":"); i > 0 && isChainComponent(c.Key[:i]) {
+					if pendingExtras[c.Slot] == nil {
+						pendingExtras[c.Slot] = make(map[string]bool)
+					}
+					pendingExtras[c.Slot][c.Key[:i]] = true
+				}
 				if i := strings.LastIndex(c.Key, ":"); i >= 0 && c.Key[i+1:] == "preset" {
 					// Only re-push full state when the preset VALUE actually
 					// changed. Some modules (e.g. jv880) re-assert preset on the
@@ -1763,6 +1787,35 @@ func (ru *RemoteUI) notifyLoop(ctx context.Context) {
 					if subscribed {
 						ru.writeJSONTry(ctx, c, update)
 					}
+				}
+			}
+		}
+
+		// Flush the derived values. Cheap (one read per declared extra key, and
+		// most components declare none), so this runs on its own short throttle
+		// rather than sharing the preset re-send's — a panel drawing a picture
+		// from `prog` is the thing the user is looking at while they turn the
+		// jog, and 150ms is the difference between "it follows" and "it lags".
+		if len(pendingExtras) > 0 {
+			for slot, comps := range pendingExtras {
+				subs := ru.subscribedClients(slot)
+				if len(subs) == 0 {
+					delete(pendingExtras, slot)
+					continue // nobody is looking: never touch the param channel
+				}
+				for comp := range comps {
+					// The gate is shared with the heartbeat, so the two can
+					// never have a push of the same component in flight at
+					// once — see extrasGate. A component still inside the
+					// throttle stays pending and goes on the next drain.
+					if !ru.extrasGate(slot, comp, extrasRefreshThrottle) {
+						continue
+					}
+					delete(comps, comp)
+					go ru.pushExtraKeys(ctx, slot, comp, subs)
+				}
+				if len(comps) == 0 {
+					delete(pendingExtras, slot)
 				}
 			}
 		}
@@ -2018,6 +2071,187 @@ func (ru *RemoteUI) fetchExtraKeysFrom(slot uint8, comp string, params []chainPa
 	return out
 }
 
+// extrasRefreshThrottle bounds how often a component's viz.extra_keys are
+// re-read because something CHANGED THEM FROM THE DEVICE. A jog spin is a
+// stream of writes; this makes it a stream of ~6 reads a second rather than
+// one per detent, and the device UI is using the same channel.
+const extrasRefreshThrottle = 150 * time.Millisecond
+
+// declaredExtraKeys answers "what does this component publish that has no cell
+// of its own", from a per-component cache.
+//
+// The list is a property of the loaded MODULE, not of its state, so re-reading
+// chain_params for it on every change would double the cost of the one thing
+// this path exists to keep cheap. invalidateExtraKeys drops the entry when the
+// slot poller sees the component's module change, which is the only event that
+// can make it wrong.
+func (ru *RemoteUI) declaredExtraKeys(slot uint8, comp string) []string {
+	k := fmt.Sprintf("%d|%s", slot, comp)
+
+	ru.extrasMu.Lock()
+	if ru.extrasKeys != nil {
+		if keys, ok := ru.extrasKeys[k]; ok {
+			ru.extrasMu.Unlock()
+			return keys
+		}
+	}
+	ru.extrasMu.Unlock()
+
+	keys := extraKeysOf(ru.fetchChainParams(slot, comp))
+
+	ru.extrasMu.Lock()
+	if ru.extrasKeys == nil {
+		ru.extrasKeys = make(map[string][]string)
+	}
+	// Cache the empty answer too: most components declare no extra keys, and
+	// re-asking them on every change is exactly the flood this avoids.
+	ru.extrasKeys[k] = keys
+	ru.extrasMu.Unlock()
+	return keys
+}
+
+func (ru *RemoteUI) invalidateExtraKeys(slot uint8, comp string) {
+	ru.extrasMu.Lock()
+	defer ru.extrasMu.Unlock()
+	if ru.extrasKeys != nil {
+		delete(ru.extrasKeys, fmt.Sprintf("%d|%s", slot, comp))
+	}
+}
+
+// pushExtraKeys re-reads a component's viz.extra_keys and pushes them to the
+// given subscribers.
+//
+// WHY THE NOTIFY RING IS NOT ENOUGH ON ITS OWN. The ring carries the key that
+// was WRITTEN. An extra key is DERIVED — stacks publishes its whole
+// progression as `prog`, computed from the edit that just landed — so no write
+// ever names it and it was never re-read outside an initial value send. The
+// visible result: turn the jog on the device and the browser's chord strip,
+// piano roll and playhead sat on the state they had when the tab was opened,
+// while the ordinary controls beside them updated correctly.
+func (ru *RemoteUI) pushExtraKeys(ctx context.Context, slot uint8, comp string, clients []*ruClient) {
+	defer ru.extrasDone(slot, comp)
+	if len(clients) == 0 {
+		return
+	}
+	keys := ru.declaredExtraKeys(slot, comp)
+	if len(keys) == 0 {
+		return
+	}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		fullKey := comp + ":" + k
+		val, err := ru.shm.GetParam(slot, fullKey)
+		if err != nil {
+			continue
+		}
+		// Send only what MOVED. The heartbeat below asks twice a second
+		// whether the transport is running; a progression that has not
+		// changed must not become 2 messages a second on the wire.
+		vk := fmt.Sprintf("%d|%s", slot, fullKey)
+		ru.extrasMu.Lock()
+		same := ru.extrasValue != nil && ru.extrasValue[vk] == val
+		if !same {
+			if ru.extrasValue == nil {
+				ru.extrasValue = make(map[string]string)
+			}
+			ru.extrasValue[vk] = val
+		}
+		ru.extrasMu.Unlock()
+		if !same {
+			out[fullKey] = val
+		}
+	}
+	if len(out) == 0 {
+		return
+	}
+	update := wsParamUpdate{Type: "param_update", Slot: slot, Params: out}
+	for _, c := range clients {
+		ru.writeJSONTry(ctx, c, update)
+	}
+}
+
+// extrasGate answers whether a push for this component may START now: not
+// sooner than minInterval since the last one, and never while one is still in
+// flight.
+//
+// The in-flight half is not belt-and-braces. Two overlapping pushes read the
+// same keys and answer in whatever order the param channel serves them, so the
+// browser can receive an OLDER progression after a newer one — which presents
+// as a playhead that jumps backwards and a transport that flickers between
+// running and stopped, i.e. as a module misbehaving rather than as a manager
+// racing itself.
+func (ru *RemoteUI) extrasGate(slot uint8, comp string, minInterval time.Duration) bool {
+	k := fmt.Sprintf("%d|%s", slot, comp)
+	now := time.Now()
+
+	ru.extrasMu.Lock()
+	defer ru.extrasMu.Unlock()
+	if ru.extrasBusy[k] {
+		return false
+	}
+	if last, ok := ru.extrasLast[k]; ok && now.Sub(last) < minInterval {
+		return false
+	}
+	if ru.extrasLast == nil {
+		ru.extrasLast = make(map[string]time.Time)
+	}
+	if ru.extrasBusy == nil {
+		ru.extrasBusy = make(map[string]bool)
+	}
+	ru.extrasLast[k] = now
+	ru.extrasBusy[k] = true
+	return true
+}
+
+func (ru *RemoteUI) extrasDone(slot uint8, comp string) {
+	ru.extrasMu.Lock()
+	defer ru.extrasMu.Unlock()
+	delete(ru.extrasBusy, fmt.Sprintf("%d|%s", slot, comp))
+}
+
+// extrasHeartbeatMs is the SLOW ask, for the changes that no write announces.
+//
+// The change-driven push above covers edits, because an edit is a param write.
+// It cannot cover the TRANSPORT: press play on the Move and the module starts
+// running with nothing written anywhere, so the browser's playhead sat still
+// and its live dot stayed dark while the device was audibly playing. The same
+// is true of anything a worker thread finishes.
+//
+// 500ms is ~6 reads a second on the shared param channel while a panel with
+// extra keys is open, and nothing at all when none is. Only values that
+// actually moved are sent.
+const extrasHeartbeat = 500 * time.Millisecond
+
+func (ru *RemoteUI) extrasHeartbeatLoop(ctx context.Context) {
+	ticker := time.NewTicker(extrasHeartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if ru.ensureShm() == nil {
+			continue
+		}
+		for slot := uint8(0); slot < 4; slot++ {
+			subs := ru.subscribedClients(slot)
+			if len(subs) == 0 {
+				continue // nobody is looking: never touch the param channel
+			}
+			for _, comp := range componentPrefixes {
+				if len(ru.declaredExtraKeys(slot, comp)) == 0 {
+					continue
+				}
+				if !ru.extrasGate(slot, comp, extrasHeartbeat) {
+					continue
+				}
+				go ru.pushExtraKeys(ctx, slot, comp, subs)
+			}
+		}
+	}
+}
+
 // fetchExtraKeys is fetchExtraKeysFrom for a caller that has not parsed
 // chain_params — the "state" fast paths, which never look at it.
 //
@@ -2052,6 +2286,9 @@ func (ru *RemoteUI) pollSlot(ctx context.Context, slot uint8, cache *slotCache) 
 		// Detect module change (loaded/unloaded/swapped).
 		if prev, ok := cache.modules[comp]; !ok || prev != modID {
 			cache.modules[comp] = modID
+			// A different module declares different extra keys — the one event
+			// that can make the cached list wrong.
+			ru.invalidateExtraKeys(slot, comp)
 			ru.broadcastSlotInfo(ctx, slot)
 			if modID != "" {
 				if url := ru.findModuleWebUI(modID); url != "" {

@@ -923,7 +923,19 @@ function drawRoll(p, now){
  * was editing the copy. It answers for the gap between the tap and the answer,
  * and prog wins the moment prog speaks.
  */
-var selPending = null;
+var selPending = null, selPendingMs = 0;
+/*
+ * A PUBLISH IS NOT AN ANSWER TO OUR WRITE.
+ *
+ * `prog` now arrives whenever ANYTHING moves -- the Move's own jog included --
+ * so a publish that was already in flight when you tapped a card is not the
+ * module answering that tap. Clearing the local selection on any new prog made
+ * the highlight jump back to the old chord for a beat and then forward again.
+ * It is cleared when prog CONFIRMS it, or after SEL_ACK_MS, so a write that
+ * never lands cannot latch the highlight on a lie either.
+ */
+var SEL_ACK_MS = 1200;
+function pendSel(n){ selPending = n; selPendingMs = Date.now(); }
 function selIndex(p){
   if (selPending !== null && (!p || (selPending >= 1 && selPending <= p.count)))
     return selPending;
@@ -1088,7 +1100,7 @@ function drawStrip(p){
      */
     b.style.flexGrow = String(Math.max(1, c.len));
     b.onpointerdown = function(ev){
-      ev.preventDefault(); selPending = i+1; set("sel", i+1); holdOn();
+      ev.preventDefault(); pendSel(i+1); set("sel", i+1); holdOn();
     };
     el.appendChild(b);
   });
@@ -1134,6 +1146,12 @@ function holdOff(){ if (holding){ holding = false; set("play", "off"); } }
 window.addEventListener("pointerup", holdOff);
 window.addEventListener("pointercancel", holdOff);
 window.addEventListener("blur", holdOff);
+/* A tab hidden or closed mid-press never sends the release, and the module
+   would hold the chord for the rest of the session. */
+window.addEventListener("pagehide", holdOff);
+document.addEventListener("visibilitychange", function(){
+  if (document.visibilityState === "hidden") holdOff();
+});
 /* Still momentary for the EDIT controls (a degree, a root): those change the
    chord and play it once so you hear what you picked. */
 function audition(){ set("play","on"); setTimeout(function(){ set("play","off"); }, 400); }
@@ -1687,7 +1705,11 @@ function render(){
   var s = get("prog") || (DEMO ? DEMO_PROG : "");
   if (s !== lastStr){
     lastStr = s; prog = parseProg(s); reanchor(prog);
-    selPending = null;          /* the module has answered; it is authoritative */
+    /* Answered, or given up on -- see pendSel. Either way prog is the truth
+       from here, and it is the truth whichever surface last moved it. */
+    if (selPending !== null && (!prog || prog.sel === selPending
+                                || Date.now() - selPendingMs > SEL_ACK_MS))
+      selPending = null;
   }
   document.getElementById("demoBadge").hidden = !DEMO;
   if (prog){
@@ -1708,7 +1730,7 @@ cv.addEventListener("pointerdown", function(e){
   var r = cv.getBoundingClientRect(), x = e.clientX - r.left;
   for (var i = 0; i < hits.length; i++)
     if (x >= hits[i].x && x <= hits[i].x + hits[i].w){
-      selPending = hits[i].i+1; set("sel", hits[i].i+1); holdOn(); return; }
+      pendSel(hits[i].i+1); set("sel", hits[i].i+1); holdOn(); return; }
 });
 
 /*
@@ -1757,16 +1779,76 @@ function pollStatus(){
     set("remove", "on");
     /* Optimistic only for the gap: the removed slot is gone, so point at what
        takes its place. Cleared by the next publish either way. */
-    selPending = cur > n - 1 ? n - 1 : cur;
+    pendSel(cur > n - 1 ? n - 1 : cur);
   };
 })();
 
-/* Play/stop the buffer. `preview` is an enum, so the value is a word. */
+/*
+ * THE TRANSPORT BUTTON ANSWERS "IS STACKS SOUNDING", NOT "IS PREVIEW ON".
+ *
+ * The module plays for THREE reasons and the button only knew about one of
+ * them: `preview` (its own loop), `hold_run` (a held chord), and Move's own
+ * transport, which drives it whenever Run is on. Nothing wrote a param for
+ * that last one, so while the browser could not see the playhead the
+ * disagreement was invisible. The moment it could, the panel was drawing a
+ * sweeping playhead beside a button that said "play" -- and pressing STOP set
+ * `preview` off, which is not what was making the sound, so the music carried
+ * on. Two surfaces, two different ideas of what "playing" meant.
+ *
+ * `prog.running` is the module's own answer to that question and BOTH surfaces
+ * already draw from it -- the Move's staff sweeps its playhead off the same
+ * bit. So the button reports it, and STOPS WHATEVER IS MAKING THE SOUND:
+ *
+ *   preview loop/chord  ->  preview off       (our own transport)
+ *   Run following Move  ->  run off           (Move keeps playing; we go quiet)
+ *   a held chord        ->  nothing to do     (it stops when it is let go)
+ *
+ * Play is always Preview, because it is the only transport this module owns:
+ * a browser cannot press Move's play button (the shim claims the CC -- see the
+ * auto-record obituary in stacks.c).
+ */
+function isSounding(){ return !!(prog && prog.running); }
+/*
+ * ...AND PLAY PUTS BACK WHAT STOP TOOK AWAY.
+ *
+ * Stopping Move-driven playback means switching Run off, so the obvious Play
+ * -- start our own loop -- would leave Stacks free-running against a clip Move
+ * is still playing: audibly out of phase, and the user did not ask to change
+ * transports, only to stop and start. So a stop that switched Run off is
+ * remembered, and the next Play re-joins the transport instead.
+ *
+ * If Move stopped in the meantime that Play makes no sound, and the flag is
+ * spent, so pressing again starts our own loop. Degrading to "press twice"
+ * is the price of not putting a timer in a button; a Play that could dead-end
+ * would not be worth it.
+ */
+var stoppedRun = false;
 (function(){
   var btn = document.getElementById("xport");
   btn.onclick = function(){
-    var on = String(get("preview")) === "loop";
-    set("preview", on ? "off" : "loop");
+    if (isSounding()){
+      /*
+       * STOP MEANS STOP, INCLUDING A MOMENTARY THAT LATCHED.
+       *
+       * `play` is held down: on at the press, off at the release. Miss that
+       * release -- a pointer lost to a re-render, a page closed mid-press, a
+       * claimed CC whose release the shim withheld -- and the module holds the
+       * transport open forever, with the OLD stop button (preview off) unable
+       * to touch it, because preview is not what was making the sound. That
+       * is a module playing with nothing on either screen to stop it, and it
+       * is what "stop and play are not in harmony" actually was.
+       *
+       * A redundant play=off costs one write and is idempotent, so Stop always
+       * sends it before deciding which transport to switch off.
+       */
+      set("play", "off");
+      var prev = String(get("preview"));
+      if (prev === "loop" || prev === "chord"){ stoppedRun = false; set("preview", "off"); return; }
+      if (String(get("run")) === "on"){ stoppedRun = true; set("run", "off"); return; }
+      return;
+    }
+    if (stoppedRun){ stoppedRun = false; set("run", "on"); return; }
+    set("preview", "loop");
   };
 })();
 var XP_PLAY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" '
@@ -1844,7 +1926,8 @@ function paintTransport(){
   /* Delete is refused at one chord by the module; say so rather than no-op. */
   var del = document.getElementById("actDel");
   if (del) del.disabled = !prog || prog.count <= 1;
-  var on = String(get("preview")) === "loop";
+  /* Lit when the MODULE is sounding, whatever started it -- see isSounding. */
+  var on = isSounding();
   var btn = document.getElementById("xport");
   btn.setAttribute("aria-pressed", String(on));
   btn.setAttribute("aria-label", on ? "Stop the progression" : "Play the progression");

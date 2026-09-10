@@ -525,6 +525,43 @@ Two things had to change in the manager, and the second is the one that hides:
   all 53 real params. `stateCoversParams` now requires the snapshot to contain
   at least one key the component actually declares.
 
+#### An extra key is DERIVED, so no write ever names it
+
+The notify ring carries the key that was **written**. A `viz.extra_keys` value
+is *computed* from whatever edit just landed — stacks publishes its entire
+progression as `prog` — so nothing on that ring ever mentions it, and it was
+re-read only on an initial value send. The result was a panel that updated
+correctly and drew the wrong picture: turn the jog on the device and the
+browser's ordinary controls followed, while the chord strip, the piano roll and
+the playhead beside them sat on the state they had when the tab was opened.
+
+So a change to **any** of a component's params now marks that component's extra
+keys stale and pushes them (`pushExtraKeys`, `remote_ui.go`). Three properties
+matter and each is a rule the obvious version gets wrong:
+
+- **Throttled, not per change** (150ms). A jog spin is a stream of writes on the
+  channel the device UI is itself using.
+- **The declared key LIST is cached per component**, keyed by slot, and dropped
+  when the slot poller sees that component's module change. Re-reading
+  `chain_params` to find out what to read would double the cost of the one path
+  that exists to stay cheap. The empty answer is cached too — most components
+  declare no extra keys at all, and those must cost nothing.
+- **No subscribers, no read.** With no panel open the param channel is never
+  touched.
+- **One push per component at a time.** Two overlapping pushes read the same
+  keys and answer in whatever order the param channel serves them, so the
+  browser can receive an OLDER value after a newer one — which presents as a
+  playhead jumping backwards and a transport flickering between running and
+  stopped, i.e. as a misbehaving module rather than as a manager racing itself.
+
+And a change-driven push is **not enough on its own**, because not every change
+is a change to a param. Press play on the Move and the module starts running
+with nothing written anywhere; a worker thread finishing is the same shape. So
+the extras are also asked for on a **500ms heartbeat** while a panel is
+subscribed — the browser's mirror of a takeover's `onPoll` — and only values
+that actually MOVED are sent, so an idle panel costs nothing on the wire and a
+stopped one costs nothing at all.
+
 #### `grid-auto-rows: min-content`, and why one line caused two opposite bugs
 
 With `auto` rows the tracks are sized against the pane's own height once the
@@ -2392,7 +2429,19 @@ Behavior notes:
 
 - Clicking the parameter enters a dedicated fullscreen canvas view.
 - Set `show_value: false` for button-style canvas entries that should not show a value.
-- The loaded script should expose `globalThis.canvas_overlay` (or `globalThis.canvas_overlays`) with hooks such as `onOpen`, `onMidi`, `tick`, `draw`, `onClose`, `onExit`.
+- The loaded script should expose `globalThis.canvas_overlay` (or `globalThis.canvas_overlays`) with hooks such as `onOpen`, `onMidi`, `tick`, `draw`, `onPoll`, `onClose`, `onExit`.
+- **`draw` and `tick` have `getParam`/`setParam` REMOVED** — one read is ~2.8ms
+  against a 1.68ms whole render, so a per-frame read halves the frame rate of
+  everything on screen. Every other hook keeps them, because those are events.
+- **`onPoll` is the event on a metronome**: optional, full ctx, called at most
+  every `CANVAS_POLL_MS` (250ms) while the takeover is up. It exists because a
+  takeover owns the screen for minutes and things change under it that its own
+  input did not cause — a worker thread finishing, a **Remote UI panel editing
+  the same module from a browser**. Without it a takeover tells the truth only
+  when the user touches something, which reads as a device that missed the
+  change. Read a HANDFUL of keys there, not a page: stacks reads `prog` (one
+  read, the whole picture) and buys its dozen-read knob refresh only when that
+  picture says the values changed.
 
 #### Custom widgets (`drawCell`)
 

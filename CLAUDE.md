@@ -186,6 +186,18 @@ gets wrong:
   absolute duration now -- eighths of a bar, always -- and Rate only chooses
   what a NEW chord gets. The fix DELETED code, which is the usual sign the cut
   is in the right place.
+- **A MOMENTARY THAT MISSES ITS RELEASE PLAYS FOREVER, and `preview` off does
+  not stop it.** Stacks sounds for three reasons -- its own `preview` loop, a
+  `play` hold, and MOVE'S TRANSPORT while Run is on -- so a transport button
+  wired to `preview` was answering a different question from the playhead
+  beside it: press stop while Move drives the module and the music continues.
+  Both surfaces report `prog.running` now, and Stop clears `play` first and
+  then whichever transport is actually running (`run` off for Move's, which
+  Play puts back). The latch is the real hazard: a pointer lost to a
+  re-render, a tab closed mid-press, or a claimed CC whose release the shim
+  withheld leaves `hold_run` set for the session with nothing on either screen
+  able to stop it -- so the takeover releases the hold in `onClose` and the
+  panel does on `pagehide`/`visibilitychange`.
 - **Shift belongs to the HOST on a claimed CC.** Shift+Copy / Shift+Delete are
   Schwung's snapshot and recall, and the shim withholds a shift-held press from
   a claimed CC entirely -- "the module gets the BARE buttons only". A
@@ -200,6 +212,16 @@ gets wrong:
   every later module that control until a reboot. `reconcilePadBlock()` only
   ever CLEARS, tests whether the display is SHOWING (not just the view), and
   RESTORES Move's pad LEDs rather than darkening them. `docs/SHADOW_UI.md`.
+- **A TAKEOVER MUST BE ABLE TO ASK AGAIN, and a frame is not the place.**
+  `draw` and `tick` are DRAW_PATH_HOOKS with the accessors stripped, so a
+  takeover used to read only on its own input -- and it owns the screen for
+  minutes while a worker finishes or a **Remote UI panel edits the same module
+  from a browser**. `onPoll` is the event on a metronome: optional, full ctx,
+  at most one call per `CANVAS_POLL_MS` (250ms, ~1% of the budget). Read a
+  handful of keys there, never a page -- stacks reads `prog` (one read, the
+  whole picture) and buys its dozen-read bank refresh only when that picture
+  says the values changed, which is why the staleness signature must exclude
+  every time-varying field or it says "stale" four times a second forever.
 - **A long press cannot ACT at the threshold.** `tick` is a DRAW_PATH_HOOK, so
   the runtime strips getParam/setParam from its context: it can see the
   threshold pass and DRAW that, but the action waits for the release, where
@@ -1236,6 +1258,25 @@ view — and the invariant to check is not "no nested scrollers" but that a
 scroller is never CLIPPED by its card and can reach its end. Banning them was
 a fix aimed at the symptom: the rubber-band came from `grid-auto-rows: auto`
 sizing a row shorter than the card in it. `docs/MODULES.md`.
+
+**An extra key is DERIVED, so no write ever names it.** The notify ring carries
+the key that was WRITTEN; `prog` is computed from whatever edit landed, so
+nothing on the ring mentions it and it was re-read only on an initial value
+send. A device-side edit therefore updated the browser's ordinary controls and
+left the picture beside them -- chord strip, piano roll, playhead -- on the
+state it had when the tab was opened. A change to ANY of a component's params
+now marks its extra keys stale and pushes them, throttled to 150ms, with the
+declared key LIST cached per component (dropped when its module changes) and
+**no read at all when nothing is subscribed**. That is still not enough alone:
+**not every change is a change to a PARAM** -- press play on the Move and the
+module runs with nothing written anywhere -- so the extras are also asked for on
+a 500ms heartbeat while a panel is subscribed, diffed so an idle panel sends
+nothing. One push per component at a time, because two overlapping ones answer
+in channel order and the browser then gets an OLDER progression after a newer
+one: a playhead that jumps backwards, read as a misbehaving module. The device follows the same
+truth from the other side via `onPoll` above, and `sel` is the one selection
+both surfaces write -- the takeover's cursor is not a second copy of it.
+`tests/host/test_stacks_surfaces_agree.sh`.
 
 **`install.sh` rebuilt the manager only if local `go` existed, and skipped it in
 SILENCE otherwise** — the lone warning sat on the build-failed branch *inside*

@@ -355,6 +355,16 @@ const LONG_PRESS_MS = 500;
  */
 const TOAST_MS = 1400;
 
+/*
+ * HOW OFTEN THE POLL MAY SPEND A DOZEN READS, against the host's 250ms
+ * one-read metronome. The progression itself is cheap enough to re-read four
+ * times a second; the bank's values are not, so they are re-read at most twice
+ * a second and only when `prog` says they are about a chord that changed.
+ * Together that is ~1.5% of the frame budget while a browser is editing, and
+ * one read per 250ms when it is not.
+ */
+const BANK_POLL_MS = 500;
+
 /* ===================================================================== *
  * A 3-PIXEL FONT, because the device's own is 6px wide.
  *
@@ -838,6 +848,24 @@ function refresh(ctx) {
             S.anchorMs = (typeof ctx.now === "function" ? ctx.now() : Date.now())
                        - secs * 1000;
             S.prog = parsed;
+            /*
+             * THE CURSOR IS NOT A SECOND COPY OF THE SELECTION.
+             *
+             * `sel` belongs to the module, and this screen is no longer the
+             * only thing that writes it -- the Remote UI panel selects chords
+             * too, and so does a pad. A cursor that moved only when the JOG
+             * moved it meant the two surfaces disagreed about which chord you
+             * were editing: the knobs here wrote to a chord the browser was
+             * not showing, which is the worst possible way to disagree.
+             *
+             * There is no echo to suppress. ctx.setParam is a SYNCHRONOUS
+             * round-trip, so a refresh after our own write reads back what we
+             * just wrote; adopting is a no-op in that case. The two sites that
+             * refresh BEFORE writing (insert, remove) want this too -- the
+             * module's own clamp is the truth there, and they adjust from it.
+             */
+            if (parsed.sel >= 1 && parsed.sel <= parsed.count)
+                S.cursor = parsed.sel - 1;
             if (S.cursor > parsed.count - 1) S.cursor = parsed.count - 1;
             if (S.cursor < 0) S.cursor = 0;
         }
@@ -860,7 +888,35 @@ function refreshBank(ctx) {
         const v = ctx.getParam(key);
         if (v !== null && v !== undefined) S.vals[key] = v;
     }
+    /* WHOEVER READS THE BANK RECORDS WHAT IT READ IT FOR, so the poll can ask
+     * "are these values still about the chord on screen?" without a read of
+     * its own -- and so a refresh the USER caused counts, rather than the
+     * poll immediately reading the same dozen keys again. */
+    S.bankSig = bankSig(S.prog);
     updateLeds();
+}
+
+/*
+ * WHAT THE KNOB ROW'S VALUES DEPEND ON, as one comparable string.
+ *
+ * The bank shows values (S.vals) that are read over IPC, and every one of them
+ * comes either from the SELECTED CHORD or from the progression as a whole. So
+ * a `prog` we already have is enough to say whether those reads are owed --
+ * and that is the whole point: refresh is ONE read, refreshBank is a dozen, so
+ * the poll below must be able to tell them apart without spending any.
+ *
+ * The time-varying fields are deliberately absent: bpm, posUnits, playing and
+ * running change on every publish while the transport runs, and including them
+ * would make the signature say "stale" four times a second forever.
+ */
+function bankSig(p) {
+    if (!p) return "";
+    const c = p.chords[p.sel - 1];
+    const head = [p.sel, p.count, p.grouping, p.key, p.mask,
+                  p.stepUnits, p.clipUnits].join(",");
+    if (!c) return head;
+    return head + "|" + [c.name, c.rootName, c.inv, c.len, c.off, c.vel,
+                         c.mute ? 1 : 0, c.mask].join(",");
 }
 
 function atCursor() {
@@ -1310,7 +1366,36 @@ globalThis.canvas_overlay = {
         if (typeof host_pad_block === "function") host_pad_block(1);
         refresh(ctx);
         refreshBank(ctx);
-        if (S.prog) S.cursor = Math.max(0, Math.min(S.prog.count - 1, S.prog.sel - 1));
+        /* The cursor follows `sel` inside refresh() now -- see the note there.
+         * onOpen used to do it once, which was the whole extent of this screen
+         * agreeing with anything else about the selection. */
+        S.bankPollMs = 0;
+    },
+
+    /*
+     * ASK AGAIN, BECAUSE THE OTHER SURFACE IS EDITING THE SAME MODULE.
+     *
+     * The Remote UI panel writes `sel`, roots, shapes and Preview to the very
+     * same params this screen does, and a chord auditioned there starts the
+     * same scheduler -- so everything needed to show it is already in `prog`.
+     * What was missing was anybody asking: this screen read only on its OWN
+     * input, so a browser edit was invisible until you touched the hardware,
+     * and the two surfaces silently disagreed in the meantime.
+     *
+     * The host calls this at most 4x/sec with the full ctx (see
+     * CANVAS_POLL_MS). ONE read buys the whole picture -- names, notes,
+     * selection, playhead -- because the module publishes the progression as a
+     * single value. The dozen-read bank refresh is bought only when the
+     * picture says the values it shows have actually changed.
+     */
+    onPoll(ctx) {
+        refresh(ctx);
+        if (!S.prog) return;
+        if (bankSig(S.prog) === S.bankSig) return;
+        const now = typeof ctx.now === "function" ? ctx.now() : Date.now();
+        if (now - (S.bankPollMs || 0) < BANK_POLL_MS) return;   /* try next tick */
+        S.bankPollMs = now;
+        refreshBank(ctx);
     },
 
     /*
@@ -1318,7 +1403,21 @@ globalThis.canvas_overlay = {
      * when its value changes, so a knob we left dark stays dark on its own
      * track until something moves it -- the same bug exitParamPages documents.
      */
-    onClose() {
+    onClose(ctx) {
+        /*
+         * NEVER LEAVE A HOLD BEHIND. `play` is a momentary -- on at the press,
+         * off at the release -- and a takeover can be dismissed between the
+         * two: the pad or the jog click is still down when the view goes, and
+         * the release then belongs to nobody. The module then holds the
+         * transport open for the rest of the session, playing with nothing on
+         * this screen left to stop it -- and `preview` off does not touch it,
+         * because preview is not what is making the sound.
+         *
+         * onClose is an EVENT, so it still has setParam. Idempotent, so it
+         * costs one write on a close that was holding nothing.
+         */
+        S.holding = false;
+        if (ctx && typeof ctx.setParam === "function") ctx.setParam("play", "off");
         lastLed.fill(-1);
         lastPad.fill(-1);
         /*
