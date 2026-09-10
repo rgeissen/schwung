@@ -908,6 +908,7 @@ typedef struct {
      */
     int stamp_once;      /* rec arm: stop when the progression wraps */
     int stamp_armed;     /* rec arm: waiting for Move's downbeat to begin */
+    int stamp_run_prev;  /* what Run was before arming turned it off */
     int stop_run_pending;/* write file: the worker asks, tick performs */
     double pulse_accum; /* internal clock, for preview with the transport stopped */
 
@@ -2336,6 +2337,7 @@ static int stk_process_midi(void *instance, const uint8_t *in, int in_len,
         st->pulse++;
         if (st->stamp_armed && st->clock_running && (st->pulse % BAR_CLOCKS) == 0) {
             st->stamp_armed = 0;
+            atomic_store(&st->status, 1);   /* working: the lap Move records */
             st->pulse = 0;
             st->armed_id = 0;
             st->pend_n = 0;
@@ -2348,6 +2350,7 @@ static int stk_process_midi(void *instance, const uint8_t *in, int in_len,
         st->pulse = 0; st->clock_running = 1; st->armed_id = 0;
         if (st->stamp_armed) {          /* a Start IS the downbeat */
             st->stamp_armed = 0;
+            atomic_store(&st->status, 1);   /* working: the lap Move records */
             st->run = 1;
             st->stamp_once = 1;
         }
@@ -2356,7 +2359,19 @@ static int stk_process_midi(void *instance, const uint8_t *in, int in_len,
     if (status == 0xFB) { st->clock_running = 1; return 0; }
     if (status == 0xFC) {
         st->clock_running = 0;
-        st->stamp_armed = 0;   /* a stop cancels a pending lap */
+        /*
+         * A stop CANCELS a pending lap, so it must also retract the word AND
+         * PUT RUN BACK. Arming switches Run off so the module is silent until
+         * the downbeat it is waiting for; cancel without restoring it and the
+         * next press of play produces nothing at all -- a module that has gone
+         * quiet for a reason nothing on either screen mentions, which reads as
+         * the stamp having broken something.
+         */
+        if (st->stamp_armed) {
+            atomic_store(&st->status, 0);
+            st->run = st->stamp_run_prev;
+        }
+        st->stamp_armed = 0;
         st->armed_id = 0;
         st->pend_n = 0;
         st->cur_step = -1;
@@ -2534,6 +2549,7 @@ static int stk_tick(void *instance, int frames, int sample_rate,
          * exactly one pass and nothing doubles it afterwards. */
         if (st->stamp_once && cycle >= 1) {
             st->stamp_once = 0;
+            atomic_store(&st->status, 2);   /* one lap played: that is the take */
             st->run = 0;
             st->armed_id = 0;
             st->pend_n = 0;
@@ -3536,7 +3552,9 @@ static void stk_set_param_inner(void *instance, const char *key, const char *val
                  * rather than wherever the press landed. The one-lap stop is
                  * armed with it, so nothing doubles the clip afterwards. */
                 st->stamp_armed = 1;
+                atomic_store(&st->status, 4);   /* armed: waiting for a downbeat */
                 st->armed_id = 0;
+                st->stamp_run_prev = st->run;
                 if (!st->clock_running) {
                     /* No clock to follow yet: the next Start begins the lap. */
                     st->run = 0;
@@ -3951,8 +3969,20 @@ static int stk_get_param(void *instance, const char *key, char *buf, int buf_len
         || strcmp(key, "remove") == 0 || strcmp(key, "duplicate") == 0)
         return snprintf(buf, buf_len, "off");
     if (strcmp(key, "status") == 0) {
-        static const char *const S[] = { "idle", "working", "ok", "failed" };
-        return snprintf(buf, buf_len, "%s", S[clampi(atomic_load(&((stk_t *)st)->status), 0, 3)]);
+        /*
+         * ARMED IS A STATE OF THE MODULE, NOT A GUESS BY A SURFACE.
+         *
+         * Rec-arm stamping reported NOTHING between the press and the
+         * transport -- the worker sets this field and the rec-arm path never
+         * touched it -- so the panel invented an "armed" flag of its own,
+         * started when IT pressed the button. Which meant the Move's own stamp
+         * lit nothing anywhere, a stamp armed from the browser stayed lit on
+         * the browser after a transport stop had silently cancelled it, and
+         * the two screens disagreed about a state only one of them could see.
+         * Published here, both read the same answer and neither owns it.
+         */
+        static const char *const S[] = { "idle", "working", "ok", "failed", "armed" };
+        return snprintf(buf, buf_len, "%s", S[clampi(atomic_load(&((stk_t *)st)->status), 0, 4)]);
     }
     if (strcmp(key, "state") == 0) {
         /*

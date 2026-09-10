@@ -30,6 +30,7 @@ MOD="$ROOT/src/modules/midi_fx/stacks"
 CANVAS="$MOD/canvas.js"
 PANEL="$MOD/web_ui.html"
 SHADOW="$ROOT/src/shadow/shadow_ui.js"
+DSP="$MOD/dsp/stacks.c"
 MGR="$ROOT/schwung-manager/remote_ui.go"
 fail=0
 note() { echo "FAIL: $1"; fail=1; }
@@ -190,20 +191,27 @@ if (!ov || !ov.onPoll) process.exit(1);
 
 ov.onOpen(ctx);
 
+/*
+ * A poll reads a HANDFUL, never a page: the whole picture (`prog`) and the one
+ * word that says what a stamp is doing (`status`). Anything else appearing
+ * here is a page's worth of reads arriving four times a second.
+ */
+const POLLED = ["prog", "status"];
 reads = []; ov.onPoll(ctx);
-check(reads.length === 1 && reads[0] === "prog",
-      "an idle poll cost " + reads.length + " reads, not one -- it should read `prog` and stop");
+check(reads.length <= POLLED.length && reads.every((k) => POLLED.includes(k)),
+      "an idle poll read " + reads.join(",") + " -- a poll may read only " + POLLED.join(","));
 
 /* Only the playhead moving is not a change to what the knobs show. */
 prog = P(1).replace("|4|120|0|0|", "|4|120|17|0|"); now += 600;
 reads = []; ov.onPoll(ctx);
-check(reads.length === 1,
+check(reads.length <= POLLED.length,
       "a moving playhead bought " + reads.length + " reads -- the bank is being re-read on every publish");
 
 /* The browser selects chord 3. */
 prog = P(3); now += 600;
 reads = []; ov.onPoll(ctx);
-check(reads.length > 1, "the selection moved and the bank was not re-read -- the knob row shows another chord's values");
+check(reads.length > POLLED.length + 2,
+      "the selection moved and the bank was not re-read -- the knob row shows another chord's values");
 
 reads = [];
 try { ov.draw(ctx); } catch (e) { check(false, "draw threw after a poll: " + e.message); }
@@ -220,6 +228,27 @@ check(sel.length === 1 && sel[0] === "sel=4",
       " -- expected sel=4, so the two surfaces are editing different chords");
 process.exit(bad);
 JS
+
+# --- ARMED is published, not remembered -----------------------------------
+#
+# Rec-arm stamping waits for Move's downbeat, so between the press and the
+# transport there is nothing to hear.  The module set no status for it, so the
+# panel kept an armed flag of its OWN, started when it pressed the button: a
+# stamp armed from the Move lit nothing anywhere (reported as "stamping on the
+# Move does not work"), and a transport stop cancelled the arm in the module
+# while the browser went on saying ARMED.
+grep -q '"idle", "working", "ok", "failed", "armed"' "$DSP" \
+  || note "stacks.c: `status` no longer publishes `armed` -- the rec-arm stamp is invisible again"
+grep -q 'atomic_store(&st->status, 4)' "$DSP" \
+  || note "stacks.c: arming no longer sets the status"
+grep -q 'atomic_store(&st->status, 0);' "$DSP" \
+  || note "stacks.c: a transport stop cancels the arm without retracting the word -- both screens sit on ARMED forever"
+grep -q 'st->run = st->stamp_run_prev;' "$DSP" \
+  || note "stacks.c: a cancelled arm never puts Run back -- the module goes silent with nothing on screen saying why"
+grep -q 'function armedNow(){ return String(get("status")) === "armed"; }' "$PANEL" \
+  || note "web_ui.html: the panel is guessing the armed state again instead of reading it"
+grep -q 'function drawStampMark' "$CANVAS" \
+  || note "canvas.js: the staff no longer shows what the stamp is doing"
 
 # --- the staff names its chords, and never names them WRONG ---------------
 #

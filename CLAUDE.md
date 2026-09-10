@@ -186,6 +186,18 @@ gets wrong:
   absolute duration now -- eighths of a bar, always -- and Rate only chooses
   what a NEW chord gets. The fix DELETED code, which is the usual sign the cut
   is in the right place.
+- **REC-ARM STAMPING HAD NO STATE, so it read as a dead button.** It does not
+  write a clip -- it ARMS, waits for Move's downbeat and plays exactly one lap
+  for Move to record -- and the module set no `status` for any of that, so the
+  panel invented an armed flag of its own, started when IT pressed the button.
+  A stamp armed from the MOVE therefore lit nothing anywhere ("stamping on the
+  Move doesn't work", for a mechanism that was working the whole time), and a
+  transport stop cancelled the arm while the browser went on saying ARMED.
+  `status` publishes `armed` now, both surfaces read it, the takeover blinks a
+  mark and toasts `REC + PLAY` (it cannot press Record itself -- the shim
+  claims CC 118). Arming also PARKS `run` so nothing sounds before the
+  downbeat, and a cancel must put it back or the module goes silent for a
+  reason nothing on screen mentions.
 - **THE STAFF NAMES ITS CHORDS, at the foot, where the panel puts its cards.**
   Everything it drew was a SHAPE, and a shape is not a name -- you had to
   select a chord and read the CHORD bank to learn it was Amaj7, one at a time,

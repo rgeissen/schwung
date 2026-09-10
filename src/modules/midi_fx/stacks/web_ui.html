@@ -1618,7 +1618,9 @@ function actionControl(k){
          overwritten by Move without saying so. */
       set("stamp_mode", "rec arm");
       set(k, "on");
-      noteArmed();          /* it waits for Move; it starts nothing */
+      /* Nothing to remember: the module reports `armed` from here, and it
+         reports it to the Move's screen at the same time. */
+      pollStatus();
       return;
     }
     set(k, "on");
@@ -1868,22 +1870,23 @@ var XP_STOP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColo
  * whatever the value did in between.
  */
 /*
- * ARMED is a state the panel owns, because the module does not publish one and
- * the alternative is a button that looks dead. Pressing the rec-arm stamp does
- * not start anything -- it waits for Move's downbeat -- so without a word on
- * screen there is nothing at all between the press and the transport, which is
- * exactly how "it does nothing" gets reported. Cleared when the progression
- * starts running (the lap has begun) or after a minute of no transport.
+ * ARMED IS READ, NOT REMEMBERED.
+ *
+ * This panel used to own the armed state: a timestamp, set when IT pressed the
+ * rec-arm stamp, cleared when the progression started running or after a
+ * minute. Three things were wrong with that, and all three are the same
+ * mistake -- a fact about the MODULE kept by a surface:
+ *
+ *   * a stamp armed from the MOVE lit nothing here, and nothing there either,
+ *     which is a button that does nothing as far as anyone can tell;
+ *   * a transport STOP cancels the arm in the module, and this went on saying
+ *     ARMED, waiting for a downbeat that was never coming;
+ *   * the minute-long timeout was a guess about someone else's state.
+ *
+ * The module publishes it now, so this reads `status` like everything else and
+ * the two surfaces cannot disagree.
  */
-var armedAt = 0;
-var ARM_MAX_MS = 60000;
-function noteArmed(){ armedAt = Date.now(); }
-function armedNow(){
-  if (!armedAt) return false;
-  if (prog && prog.running){ armedAt = 0; return false; }
-  if (Date.now() - armedAt > ARM_MAX_MS){ armedAt = 0; return false; }
-  return true;
-}
+function armedNow(){ return String(get("status")) === "armed"; }
 
 var jobAt = 0, jobDone = 0;
 var STAT_HOLD_MS = 3500, JOB_MAX_MS = 20000;
@@ -1891,17 +1894,28 @@ function noteJobStarted(){ jobAt = Date.now(); jobDone = 0; }
 function paintStatus(){
   var el = document.getElementById("stat");
   if (!el) return;
+  var v = String(get("status") || "");
   if (armedNow()){
     el.hidden = false;
     el.className = "stat working";
-    /* The module presses Move's record itself now; if that press does not
-       land, arming still holds and the user can press it -- so the wording
-       says what is being waited for, not what the user must do. */
-    el.textContent = "ARMED \u00B7 PRESS RECORD";
+    /* It cannot press Move's Record itself -- the shim claims CC 118 -- so the
+       wording names the thing the user has to do, in the order they do it. */
+    el.textContent = "ARMED \u00B7 REC + PLAY";
+    return;
+  }
+  /*
+   * A rec-arm lap is the module's own doing and may have been started from the
+   * other surface, so it reports whether or not THIS panel pressed anything.
+   * The jobAt window below still guards the file-write path, where a verdict
+   * belongs to the press that asked for it.
+   */
+  if (v === "working" && !jobAt){
+    el.hidden = false;
+    el.className = "stat working";
+    el.textContent = "RECORDING";
     return;
   }
   if (!jobAt){ el.hidden = true; return; }
-  var v = String(get("status") || "");
   var now = Date.now();
   if ((v === "ok" || v === "failed") && !jobDone) jobDone = now;
   /* Give up rather than sit on WORKING forever if the module never answers. */

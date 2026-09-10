@@ -772,6 +772,7 @@ const S = {
     rowScroll: [0, 0, 0],   /* how far each row is scrolled into a long list */
     toast: "",       /* what the last page movement did */
     toastAt: 0,
+    status: "idle",  /* the module's own word for what a stamp is doing */
     trigKnob: -1,    /* knob whose trigger already fired this gesture */
     trigAt: 0,       /* when it fired, for the latch */
     holdCC: -1,      /* an edit button being held, for the long press */
@@ -1126,6 +1127,31 @@ function drawRunMark(ctx, prog, W, y) {
  * drifted rather than as a setting doing its job. `none` draws nothing at all,
  * so the mark means exactly "something is being applied".
  */
+/*
+ * WHAT THE STAMP IS DOING, on the one screen that could not see it.
+ *
+ * Rec-arm stamping does not write a clip -- it waits for Move's downbeat and
+ * then plays exactly one lap for Move to record -- so between the press and
+ * the transport there is nothing to hear and, until now, nothing to see. On
+ * this screen that was the whole feedback: a knob you turn and a module that
+ * appears not to have noticed, which is how "stamping on the Move does not
+ * work" gets reported for a mechanism that was working the entire time.
+ *
+ * BLINKING while armed, because armed is a state that is WAITING for you --
+ * the one thing on this staff that is asking for an action rather than
+ * reporting one. Solid while the lap is being recorded.
+ */
+function drawStampMark(ctx, status, W, y, nowMs) {
+    if (status !== "armed" && status !== "working") return;
+    if (status === "armed" && (Math.floor(nowMs / 400) % 2)) return;
+    const x = 1;
+    ctx.fillRect(x, y - 3, 5, 1, 1);
+    ctx.fillRect(x, y + 1, 5, 1, 1);
+    ctx.fillRect(x, y - 2, 1, 3, 1);
+    ctx.fillRect(x + 4, y - 2, 1, 3, 1);
+    if (status === "working") ctx.fillRect(x + 2, y - 1, 1, 1, 1);
+}
+
 function drawGroupMark(ctx, prog, W, y) {
     if (!prog || !prog.grouping) return;
     const x = W - (prog.running ? 13 : 6);
@@ -1441,6 +1467,10 @@ globalThis.canvas_overlay = {
         if (typeof host_pad_block === "function") host_pad_block(1);
         refresh(ctx);
         refreshBank(ctx);
+        /* A stamp armed from the browser is already waiting when this opens,
+         * so the mark is right from the first frame rather than a poll later. */
+        const st0 = ctx.getParam("status");
+        S.status = (st0 === null || st0 === undefined) ? "idle" : String(st0);
         /* The cursor follows `sel` inside refresh() now -- see the note there.
          * onOpen used to do it once, which was the whole extent of this screen
          * agreeing with anything else about the selection. */
@@ -1465,6 +1495,14 @@ globalThis.canvas_overlay = {
      */
     onPoll(ctx) {
         refresh(ctx);
+        /*
+         * One more read on the metronome (never on the draw path): `status`
+         * is how the module says a stamp is armed, and it can be armed from
+         * the OTHER surface, so asking only when we pressed something would
+         * make this screen right exactly half the time.
+         */
+        const st = ctx.getParam("status");
+        if (st !== null && st !== undefined) S.status = String(st);
         if (!S.prog) return;
         if (bankSig(S.prog) === S.bankSig) return;
         const now = typeof ctx.now === "function" ? ctx.now() : Date.now();
@@ -1527,6 +1565,8 @@ globalThis.canvas_overlay = {
         ctx.fillRect(0, F3_H + 2, W, 1, 1);
         drawRunMark(ctx, S.prog, W, F3_H + 1);
         drawGroupMark(ctx, S.prog, W, F3_H + 1);
+        drawStampMark(ctx, S.status, W, F3_H + 1,
+                      typeof ctx.now === "function" ? ctx.now() : 0);
         /* module.json declares show_footer:false, so nothing is painted after
          * this and the roll owns everything below the rule. */
         drawRoll(ctx, S.prog, F3_H + 4, H - 1);
@@ -1870,7 +1910,21 @@ globalThis.canvas_overlay = {
                 }
                 S.trigKnob = slot;
                 S.trigAt = t;
+                if (key === "stamp") {
+                    /* ONE STAMP, ONE MEANING -- asserted, not trusted. A state
+                     * saved before the write-file mode was retired can still
+                     * restore it, and that write is overwritten by Move
+                     * without a word. The panel asserts the same thing. */
+                    ctx.setParam("stamp_mode", "rec arm");
+                }
                 ctx.setParam(key, "on");
+                if (key === "stamp") {
+                    S.status = "armed";
+                    /* It cannot press Move's Record itself: the shim claims
+                     * CC 118 for the sampler. So the toast names the two
+                     * buttons, in the order they are pressed. */
+                    say(ctx, "ARMED: REC + PLAY");
+                }
                 refresh(ctx);
                 refreshBank(ctx);
                 return;
